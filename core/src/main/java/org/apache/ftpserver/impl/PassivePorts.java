@@ -119,6 +119,18 @@ public class PassivePorts {
     }
 
     /**
+     * Returns all configured ports, regardless of reservation state.
+     *
+     * @return set of configured passive ports
+     */
+    public synchronized Set<Integer> getPorts() {
+        Set<Integer> ports = new HashSet<>(freeList.size() + usedList.size());
+        ports.addAll(freeList);
+        ports.addAll(usedList);
+        return ports;
+    }
+
+    /**
      * Fill a range of ports
      */
     private static void fillRange(final Set<Integer> passivePortsList, final Integer beginPort, final Integer endPort) {

@@ -170,4 +170,11 @@ public interface Listener {
      *         return <code>null</code>.
      */
     SessionFilter getSessionFilter();
+
+    /**
+     * Returns the passive connection service if passive port multiplexing is enabled.
+     *
+     * @return PassiveConnectionService or null when multiplexing is disabled
+     */
+    org.apache.ftpserver.impl.PassiveConnectionService getPassiveConnectionService();
 }

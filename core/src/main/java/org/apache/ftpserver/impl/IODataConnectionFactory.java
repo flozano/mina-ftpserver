@@ -33,6 +33,7 @@ import org.apache.ftpserver.DataConnectionConfiguration;
 import org.apache.ftpserver.DataConnectionException;
 import org.apache.ftpserver.ftplet.DataConnection;
 import org.apache.ftpserver.ftplet.FtpException;
+import org.apache.ftpserver.listener.Listener;
 import org.apache.ftpserver.ssl.ClientAuth;
 import org.apache.ftpserver.ssl.SslConfiguration;
 import org.slf4j.Logger;
@@ -66,6 +67,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
     boolean secure = false;
 
     private boolean isZip = false;
+
+    private PassiveConnectionService.Reservation passiveReservation;
+    private PassiveConnectionService passiveConnectionService;
 
     InetAddress serverControlAddress;
 
@@ -114,11 +118,19 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 DataConnectionConfiguration dcc = session.getListener().getDataConnectionConfiguration();
 
                 if (dcc != null) {
-                    dcc.releasePassivePort(port);
+                    if (dcc.isMultiplexPassivePorts()) {
+                        if (passiveConnectionService != null && passiveReservation != null) {
+                            passiveConnectionService.cancel(passiveReservation);
+                        }
+                    } else {
+                        dcc.releasePassivePort(port);
+                    }
                 }
             }
 
             servSoc = null;
+            passiveReservation = null;
+            passiveConnectionService = null;
         }
 
         // reset request time
@@ -164,15 +176,6 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
         // close old sockets if any
         closeDataConnection();
 
-        // get the passive port
-        int passivePort = session.getListener().getDataConnectionConfiguration().requestPassivePort();
-
-        if (passivePort == -1) {
-            servSoc = null;
-            throw new DataConnectionException("Cannot find an available passive port.");
-        }
-
-        // open passive server socket and get parameters
         try {
             DataConnectionConfiguration dataCfg = session.getListener().getDataConnectionConfiguration();
 
@@ -184,6 +187,31 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 address = resolveAddress(dataCfg.getPassiveAddress());
             }
 
+            if (dataCfg.isMultiplexPassivePorts()) {
+                Listener listener = session.getListener();
+                PassiveConnectionService service = listener.getPassiveConnectionService();
+                if (service == null) {
+                    throw new DataConnectionException(
+                            "Passive port multiplexing is enabled but no service is available");
+                }
+                passiveConnectionService = service;
+                InetAddress clientAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
+                passiveReservation = passiveConnectionService.register(clientAddress);
+                port = passiveReservation.getPort();
+                passive = true;
+                requestTime = System.currentTimeMillis();
+                return new InetSocketAddress(address, port);
+            }
+
+            // get the passive port
+            int passivePort = dataCfg.requestPassivePort();
+
+            if (passivePort == -1) {
+                servSoc = null;
+                throw new DataConnectionException("Cannot find an available passive port.");
+            }
+
+            // open passive server socket and get parameters
             if (secure) {
                 LOG.debug("Opening SSL passive data connection on address \"{}\" and port {}", address, passivePort);
                 SslConfiguration ssl = getSslConfiguration();
@@ -301,28 +329,77 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                 dataSoc.connect(new InetSocketAddress(address, port));
             } else {
-                if (secure) {
-                    LOG.debug("Opening secure passive data connection");
-                    // this is where we wrap the unsecured socket as a SSLSocket. This is
-                    // due to the JVM bug described in FTPSERVER-241.
+                Socket acceptedSocket;
 
-                    // get server socket factory
+                if (session.getListener().getDataConnectionConfiguration().isMultiplexPassivePorts()) {
+                    if (passiveReservation == null || passiveConnectionService == null) {
+                        throw new FtpException("Passive port reservation missing");
+                    }
+                    int timeout = dataConfig.getIdleTime() * 1000;
+                    acceptedSocket = passiveReservation.await(timeout);
+                    if (acceptedSocket == null) {
+                        throw new FtpException("Passive data connection timed out");
+                    }
+                } else {
+                    if (secure) {
+                        LOG.debug("Opening secure passive data connection");
+                        // this is where we wrap the unsecured socket as a SSLSocket. This is
+                        // due to the JVM bug described in FTPSERVER-241.
+
+                        // get server socket factory
+                        SslConfiguration ssl = getSslConfiguration();
+
+                        // we've already checked this, but let's do it again
+                        if (ssl == null) {
+                            throw new FtpException("Data connection SSL not configured");
+                        }
+
+                        SSLSocketFactory ssocketFactory = ssl.getSocketFactory();
+
+                        Socket serverSocket = servSoc.accept();
+
+                        SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
+                            serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
+                        sslSocket.setUseClientMode(false);
+
+                        // initialize server socket
+                        if (ssl.getClientAuth() == ClientAuth.NEED) {
+                            sslSocket.setNeedClientAuth(true);
+                        } else if (ssl.getClientAuth() == ClientAuth.WANT) {
+                            sslSocket.setWantClientAuth(true);
+                        }
+
+                        if (ssl.getEnabledCipherSuites() != null) {
+                            sslSocket.setEnabledCipherSuites(ssl.getEnabledCipherSuites());
+                        }
+
+                        if (ssl.getEnabledProtocols() != null) {
+                            sslSocket.setEnabledProtocols(ssl.getEnabledProtocols());
+                        }
+
+                        dataSoc = sslSocket;
+                        acceptedSocket = dataSoc;
+                    } else {
+                        LOG.debug("Opening passive data connection");
+
+                        acceptedSocket = servSoc.accept();
+                    }
+                }
+
+                if (secure && !session.getListener().getDataConnectionConfiguration().isMultiplexPassivePorts()) {
+                    // dataSoc already set above
+                } else if (secure) {
                     SslConfiguration ssl = getSslConfiguration();
 
-                    // we've already checked this, but let's do it again
                     if (ssl == null) {
                         throw new FtpException("Data connection SSL not configured");
                     }
 
                     SSLSocketFactory ssocketFactory = ssl.getSocketFactory();
-
-                    Socket serverSocket = servSoc.accept();
-
-                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
-                        serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
+                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(acceptedSocket,
+                        acceptedSocket.getInetAddress().getHostAddress(), acceptedSocket.getPort(), true);
                     sslSocket.setUseClientMode(false);
 
-                    // initialize server socket
                     if (ssl.getClientAuth() == ClientAuth.NEED) {
                         sslSocket.setNeedClientAuth(true);
                     } else if (ssl.getClientAuth() == ClientAuth.WANT) {
@@ -339,9 +416,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                     dataSoc = sslSocket;
                 } else {
-                    LOG.debug("Opening passive data connection");
-
-                    dataSoc = servSoc.accept();
+                    dataSoc = acceptedSocket;
                 }
 
                 if (dataConfig.isPassiveIpCheck()) {

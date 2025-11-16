@@ -58,6 +58,8 @@ public abstract class AbstractListener implements Listener {
 
     private final DataConnectionConfiguration dataConnectionConfig;
 
+    private org.apache.ftpserver.impl.PassiveConnectionService passiveConnectionService;
+
     /**
      * @deprecated Use the constructor with IpFilter instead.
      * Constructor for internal use, do not use directly. Instead use {@link ListenerFactory}
@@ -183,6 +185,15 @@ public abstract class AbstractListener implements Listener {
      */
     public DataConnectionConfiguration getDataConnectionConfiguration() {
         return dataConnectionConfig;
+    }
+
+    public org.apache.ftpserver.impl.PassiveConnectionService getPassiveConnectionService() {
+        return passiveConnectionService;
+    }
+
+    protected void setPassiveConnectionService(
+            org.apache.ftpserver.impl.PassiveConnectionService passiveConnectionService) {
+        this.passiveConnectionService = passiveConnectionService;
     }
 
     /**
