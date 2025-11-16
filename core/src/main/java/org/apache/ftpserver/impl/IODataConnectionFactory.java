@@ -343,13 +343,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 } else {
                     if (secure) {
                         LOG.debug("Opening secure passive data connection");
-                        // this is where we wrap the unsecured socket as a SSLSocket. This is
-                        // due to the JVM bug described in FTPSERVER-241.
-
-                        // get server socket factory
+                        // keep wrapping immediately after accept due to JVM bug (FTPSERVER-241)
                         SslConfiguration ssl = getSslConfiguration();
 
-                        // we've already checked this, but let's do it again
                         if (ssl == null) {
                             throw new FtpException("Data connection SSL not configured");
                         }
@@ -362,7 +358,6 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                             serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
                         sslSocket.setUseClientMode(false);
 
-                        // initialize server socket
                         if (ssl.getClientAuth() == ClientAuth.NEED) {
                             sslSocket.setNeedClientAuth(true);
                         } else if (ssl.getClientAuth() == ClientAuth.WANT) {
@@ -381,14 +376,14 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                         acceptedSocket = dataSoc;
                     } else {
                         LOG.debug("Opening passive data connection");
-
                         acceptedSocket = servSoc.accept();
                     }
                 }
 
                 if (secure && !session.getListener().getDataConnectionConfiguration().isMultiplexPassivePorts()) {
-                    // dataSoc already set above
+                    // non-multiplex secure path already wrapped above
                 } else if (secure) {
+                    // Wrap the accepted socket for TLS even when multiplexing is enabled.
                     SslConfiguration ssl = getSslConfiguration();
 
                     if (ssl == null) {
@@ -396,8 +391,10 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     }
 
                     SSLSocketFactory ssocketFactory = ssl.getSocketFactory();
-                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(acceptedSocket,
-                        acceptedSocket.getInetAddress().getHostAddress(), acceptedSocket.getPort(), true);
+                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(
+                            acceptedSocket,
+                            acceptedSocket.getInetAddress().getHostAddress(),
+                            acceptedSocket.getPort(), true);
                     sslSocket.setUseClientMode(false);
 
                     if (ssl.getClientAuth() == ClientAuth.NEED) {
