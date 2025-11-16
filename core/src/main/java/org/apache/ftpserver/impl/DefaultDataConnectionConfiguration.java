@@ -88,6 +88,34 @@ public class DefaultDataConnectionConfiguration implements
     }
 
     /**
+     * Backward-compatible constructor without multiplex flag.
+     *
+     * @param idleTime The idle time
+     * @param ssl SSL configuration
+     * @param activeEnabled active mode enabled flag
+     * @param activeIpCheck active IP check flag
+     * @param activeLocalAddress active local address
+     * @param activeLocalPort active local port
+     * @param passiveAddress passive address
+     * @param passivePorts passive ports
+     * @param passiveExternalAddress passive external address
+     * @param passiveIpCheck passive IP check flag
+     * @param implicitSsl implicit SSL flag
+     * @deprecated use
+     * {@link #DefaultDataConnectionConfiguration(int, SslConfiguration, boolean, boolean,
+     * String, int, String, PassivePorts, String, boolean, boolean, boolean)}
+     */
+    @Deprecated
+    public DefaultDataConnectionConfiguration(int idleTime,
+        SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
+        String activeLocalAddress, int activeLocalPort, String passiveAddress,
+        PassivePorts passivePorts, String passiveExternalAddress,
+        boolean passiveIpCheck, boolean implicitSsl) {
+        this(idleTime, ssl, activeEnabled, activeIpCheck, activeLocalAddress, activeLocalPort,
+            passiveAddress, passivePorts, passiveExternalAddress, passiveIpCheck, implicitSsl, false);
+    }
+
+    /**
      * Get the maximum idle time in seconds.
      *
      * {@inheritDoc}

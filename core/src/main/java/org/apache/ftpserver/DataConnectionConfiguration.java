@@ -135,11 +135,4 @@ public interface DataConnectionConfiguration {
      * @return True if SSL is mandatory for the data channel
      */
     boolean isImplicitSsl();
-
-    /**
-     * Tells if passive ports should be multiplexed per client IP (port+IP routing).
-     *
-     * @return True if multiplexed passive ports are enabled
-     */
-    boolean isMultiplexPassivePorts();
 }
