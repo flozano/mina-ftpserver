@@ -132,8 +132,12 @@ public class NioListener extends AbstractListener {
                 address = new InetSocketAddress(getPort());
             }
 
-            if (getDataConnectionConfiguration().isMultiplexPassivePorts()
-                    && getPassiveConnectionService() == null) {
+            boolean multiplex = isMultiplexEnabled(getDataConnectionConfiguration());
+            boolean hasService = getPassiveConnectionService() != null;
+            boolean defaultConfig = getDataConnectionConfiguration()
+                    instanceof org.apache.ftpserver.impl.DefaultDataConnectionConfiguration;
+
+            if (multiplex && !hasService && defaultConfig) {
                 InetAddress passiveBindAddress = null;
                 String passiveAddress = getDataConnectionConfiguration().getPassiveAddress();
                 if (passiveAddress != null) {
@@ -144,9 +148,11 @@ public class NioListener extends AbstractListener {
                     }
                 }
 
+                org.apache.ftpserver.impl.DefaultDataConnectionConfiguration cfg =
+                        (org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) getDataConnectionConfiguration();
                 org.apache.ftpserver.impl.PassiveConnectionService pcs =
                     new org.apache.ftpserver.impl.PassiveConnectionService(
-                        getDataConnectionConfiguration().getPassivePortSet(), passiveBindAddress);
+                        cfg.getPassivePortSet(), passiveBindAddress);
                 pcs.start();
                 setPassiveConnectionService(pcs);
             }
@@ -224,6 +230,13 @@ public class NioListener extends AbstractListener {
     private void updatePort() {
         // update the port to the real port bound by the listener
         setPort(acceptor.getLocalAddress().getPort());
+    }
+
+    private boolean isMultiplexEnabled(org.apache.ftpserver.DataConnectionConfiguration cfg) {
+        if (cfg instanceof org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) {
+            return ((org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) cfg).isMultiplexPassivePorts();
+        }
+        return false;
     }
 
     /**

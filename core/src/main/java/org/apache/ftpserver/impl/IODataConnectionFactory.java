@@ -118,7 +118,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 DataConnectionConfiguration dcc = session.getListener().getDataConnectionConfiguration();
 
                 if (dcc != null) {
-                    if (dcc.isMultiplexPassivePorts()) {
+                    if (isMultiplexEnabled(dcc)) {
                         if (passiveConnectionService != null && passiveReservation != null) {
                             passiveConnectionService.cancel(passiveReservation);
                         }
@@ -187,7 +187,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 address = resolveAddress(dataCfg.getPassiveAddress());
             }
 
-            if (dataCfg.isMultiplexPassivePorts()) {
+            if (isMultiplexEnabled(dataCfg)) {
                 Listener listener = session.getListener();
                 PassiveConnectionService service = listener.getPassiveConnectionService();
                 if (service == null) {
@@ -331,7 +331,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             } else {
                 Socket acceptedSocket;
 
-                if (session.getListener().getDataConnectionConfiguration().isMultiplexPassivePorts()) {
+                if (isMultiplexEnabled(session.getListener().getDataConnectionConfiguration())) {
                     if (passiveReservation == null || passiveConnectionService == null) {
                         throw new FtpException("Passive port reservation missing");
                     }
@@ -380,7 +380,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     }
                 }
 
-                if (secure && !session.getListener().getDataConnectionConfiguration().isMultiplexPassivePorts()) {
+                if (secure && !isMultiplexEnabled(session.getListener().getDataConnectionConfiguration())) {
                     // non-multiplex secure path already wrapped above
                 } else if (secure) {
                     // Wrap the accepted socket for TLS even when multiplexing is enabled.
@@ -488,6 +488,13 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      */
     public boolean isZipMode() {
         return isZip;
+    }
+
+    private boolean isMultiplexEnabled(DataConnectionConfiguration cfg) {
+        if (cfg instanceof DefaultDataConnectionConfiguration) {
+            return ((DefaultDataConnectionConfiguration) cfg).isMultiplexPassivePorts();
+        }
+        return false;
     }
 
     /**
