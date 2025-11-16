@@ -183,6 +183,16 @@ public class MultiplexPassivePortTest extends ClientTestTemplate {
             this.localAddress = InetAddress.getByName(ip);
         }
 
+        /**
+         * Used by Commons Net for data connections in passive mode.
+         */
+        @Override
+        public Socket createSocket() throws IOException {
+            Socket s = new Socket();
+            s.bind(new InetSocketAddress(localAddress, 0));
+            return s;
+        }
+
         public Socket createSocket(String host, int port) throws IOException {
             Socket s = new Socket();
             s.bind(new InetSocketAddress(localAddress, 0));
