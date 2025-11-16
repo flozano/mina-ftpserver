@@ -288,6 +288,8 @@ public class ListenerBeanDefinitionParser extends AbstractSingleBeanDefinitionPa
                     dc.setPassivePorts(ports);
                 }
 
+                dc.setMultiplexPassivePorts(SpringUtil.parseBoolean(passiveElm, "multiplex-ports", false));
+
                 dc.setPassiveIpCheck(SpringUtil.parseBoolean(passiveElm, "ip-check", false));
             }
         } else {

@@ -48,6 +48,7 @@ public class DefaultDataConnectionConfiguration implements
     private final boolean passiveIpCheck;
 
     private final boolean implicitSsl;
+    private final boolean multiplexPassivePorts;
 
     /**
      * Internal constructor, do not use directly. Use
@@ -64,13 +65,14 @@ public class DefaultDataConnectionConfiguration implements
      * @param passiveExternalAddress The passive external address
      * @param passiveIpCheck The passive IP check
      * @param implicitSsl Implicit SSL
+     * @param multiplexPassivePorts Enable passive port multiplexing per client IP
      *
      */
     public DefaultDataConnectionConfiguration(int idleTime,
         SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
         String activeLocalAddress, int activeLocalPort, String passiveAddress,
         PassivePorts passivePorts, String passiveExternalAddress,
-        boolean passiveIpCheck, boolean implicitSsl) {
+        boolean passiveIpCheck, boolean implicitSsl, boolean multiplexPassivePorts) {
         this.idleTime = idleTime;
         this.ssl = ssl;
         this.activeEnabled = activeEnabled;
@@ -82,6 +84,7 @@ public class DefaultDataConnectionConfiguration implements
         this.passiveExternalAddress = passiveExternalAddress;
         this.passiveIpCheck = passiveIpCheck;
         this.implicitSsl = implicitSsl;
+        this.multiplexPassivePorts = multiplexPassivePorts;
     }
 
     /**
@@ -170,6 +173,10 @@ public class DefaultDataConnectionConfiguration implements
         return passivePorts.toString();
     }
 
+    public java.util.Set<Integer> getPassivePortSet() {
+        return passivePorts.getPorts();
+    }
+
     /**
      * Release data port
      *
@@ -193,5 +200,9 @@ public class DefaultDataConnectionConfiguration implements
      */
     public boolean isImplicitSsl() {
         return implicitSsl;
+    }
+
+    public boolean isMultiplexPassivePorts() {
+        return multiplexPassivePorts;
     }
 }

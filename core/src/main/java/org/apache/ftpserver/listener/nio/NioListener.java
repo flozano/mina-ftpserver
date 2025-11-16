@@ -22,6 +22,7 @@ package org.apache.ftpserver.listener.nio;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.security.GeneralSecurityException;
 import java.util.HashSet;
 import java.util.List;
@@ -131,6 +132,25 @@ public class NioListener extends AbstractListener {
                 address = new InetSocketAddress(getPort());
             }
 
+            if (getDataConnectionConfiguration().isMultiplexPassivePorts()
+                    && getPassiveConnectionService() == null) {
+                InetAddress passiveBindAddress = null;
+                String passiveAddress = getDataConnectionConfiguration().getPassiveAddress();
+                if (passiveAddress != null) {
+                    try {
+                        passiveBindAddress = InetAddress.getByName(passiveAddress);
+                    } catch (UnknownHostException e) {
+                        throw new FtpServerConfigurationException("Unknown passive address", e);
+                    }
+                }
+
+                org.apache.ftpserver.impl.PassiveConnectionService pcs =
+                    new org.apache.ftpserver.impl.PassiveConnectionService(
+                        getDataConnectionConfiguration().getPassivePortSet(), passiveBindAddress);
+                pcs.start();
+                setPassiveConnectionService(pcs);
+            }
+
             acceptor.setReuseAddress(true);
             acceptor.getSessionConfig().setReadBufferSize(2048);
             acceptor.getSessionConfig().setIdleTime(IdleStatus.BOTH_IDLE, getIdleTimeout());
@@ -215,6 +235,11 @@ public class NioListener extends AbstractListener {
             acceptor.unbind();
             acceptor.dispose();
             acceptor = null;
+        }
+
+        if (getPassiveConnectionService() != null) {
+            getPassiveConnectionService().stop();
+            setPassiveConnectionService(null);
         }
 
         context = null;

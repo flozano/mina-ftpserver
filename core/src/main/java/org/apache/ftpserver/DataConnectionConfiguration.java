@@ -93,6 +93,13 @@ public interface DataConnectionConfiguration {
     String getPassivePorts();
 
     /**
+     * Returns the parsed passive port numbers.
+     *
+     * @return The set of passive port numbers
+     */
+    java.util.Set<Integer> getPassivePortSet();
+
+    /**
      * Tells whether or not IP address check is performed when accepting a
      * passive data connection.
      *
@@ -128,4 +135,11 @@ public interface DataConnectionConfiguration {
      * @return True if SSL is mandatory for the data channel
      */
     boolean isImplicitSsl();
+
+    /**
+     * Tells if passive ports should be multiplexed per client IP (port+IP routing).
+     *
+     * @return True if multiplexed passive ports are enabled
+     */
+    boolean isMultiplexPassivePorts();
 }
