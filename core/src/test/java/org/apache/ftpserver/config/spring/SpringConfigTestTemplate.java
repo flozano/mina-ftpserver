@@ -22,8 +22,10 @@ package org.apache.ftpserver.config.spring;
 import junit.framework.TestCase;
 
 import org.apache.ftpserver.FtpServer;
-import org.springframework.beans.factory.xml.XmlBeanFactory;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.beans.factory.xml.XmlBeanDefinitionReader;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 
 /**
 *
@@ -43,10 +45,17 @@ public abstract class SpringConfigTestTemplate extends TestCase {
             + config
             + "</server>";
 
-        XmlBeanFactory factory = new XmlBeanFactory(
+        DefaultListableBeanFactory factory = loadFactory(
                 new ByteArrayResource(completeConfig.getBytes()));
-        
-        return (FtpServer) factory.getBean("server");
 
+        return factory.getBean("server", FtpServer.class);
+
+    }
+
+    private DefaultListableBeanFactory loadFactory(Resource resource) {
+        DefaultListableBeanFactory factory = new DefaultListableBeanFactory();
+        XmlBeanDefinitionReader reader = new XmlBeanDefinitionReader(factory);
+        reader.loadBeanDefinitions(resource);
+        return factory;
     }
 }
