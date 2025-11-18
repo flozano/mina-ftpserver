@@ -48,7 +48,7 @@ public abstract class SpringConfigTestTemplate extends TestCase {
         DefaultListableBeanFactory factory = loadFactory(
                 new ByteArrayResource(completeConfig.getBytes()));
 
-        return factory.getBean("server", FtpServer.class);
+        return (FtpServer) factory.getBean("server");
 
     }
 

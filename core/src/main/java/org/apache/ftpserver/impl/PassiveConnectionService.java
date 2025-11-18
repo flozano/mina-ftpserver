@@ -20,12 +20,15 @@
 package org.apache.ftpserver.impl;
 
 import org.apache.ftpserver.DataConnectionException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -34,6 +37,8 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Passive port acceptor that multiplexes passive ports per client IP.
@@ -41,6 +46,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <strong>Internal class, do not use directly.</strong>
  */
 public class PassiveConnectionService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PassiveConnectionService.class);
 
     public static class Reservation {
         private final int port;
@@ -68,6 +75,11 @@ public class PassiveConnectionService {
         }
 
         Socket await(long timeoutMillis) throws DataConnectionException {
+            // Early check for cancellation to avoid waiting
+            if (isCancelled()) {
+                return null;
+            }
+
             try {
                 if (!latch.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
                     return null;
@@ -94,20 +106,42 @@ public class PassiveConnectionService {
     private final List<Integer> ports;
     private final InetAddress bindAddress;
     private final int maxPerIp;
+    private final int acceptTimeoutMillis;
     private final Map<Integer, ServerSocket> listeners = new HashMap<>();
     private final Map<Integer, Thread> listenerThreads = new HashMap<>();
     private final Map<Integer, Map<String, Reservation>> pendingByPort = new HashMap<>();
     private final Map<String, Integer> reservationsPerIp = new HashMap<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private int nextPortIndex = 0;
+    private final AtomicInteger nextPortIndex = new AtomicInteger(0);
+
+    // Metrics
+    private final AtomicLong totalReservations = new AtomicLong(0);
+    private final AtomicInteger activeReservations = new AtomicInteger(0);
+    private final AtomicLong totalConnections = new AtomicLong(0);
+    private final AtomicLong rejectedConnections = new AtomicLong(0);
+    private final AtomicLong cancelledReservations = new AtomicLong(0);
 
     public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress) {
+        this(ports, bindAddress, 1000);
+    }
+
+    public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis) {
         if (ports == null || ports.isEmpty()) {
             throw new IllegalArgumentException("Passive ports are required");
+        }
+        if (acceptTimeoutMillis < 100 || acceptTimeoutMillis > 10000) {
+            throw new IllegalArgumentException(
+                    "Accept timeout must be between 100 and 10000 milliseconds (recommended: 1000-5000). " +
+                    "Got: " + acceptTimeoutMillis);
+        }
+        if (ports.size() < 5) {
+            LOG.warn("Passive port range is small ({}). Recommended: at least 5 ports for adequate concurrency. " +
+                    "Each port can serve one connection per unique client IP.", ports.size());
         }
         this.ports = Collections.unmodifiableList(new ArrayList<>(ports));
         this.bindAddress = bindAddress;
         this.maxPerIp = ports.size();
+        this.acceptTimeoutMillis = acceptTimeoutMillis;
 
         // prepare pending maps so register() can be used before start() in tests
         for (int port : ports) {
@@ -124,7 +158,7 @@ public class PassiveConnectionService {
             try {
                 ServerSocket serverSocket = new ServerSocket(port, 0, bindAddress);
                 serverSocket.setReuseAddress(true);
-                serverSocket.setSoTimeout(1000);
+                serverSocket.setSoTimeout(acceptTimeoutMillis);
                 listeners.put(port, serverSocket);
 
                 Thread t = new Thread(new AcceptLoop(serverSocket, port), "ftp-passive-" + port);
@@ -181,12 +215,13 @@ public class PassiveConnectionService {
      * @return the created reservation holding the selected port
      */
     public Reservation register(InetAddress clientAddress) throws DataConnectionException {
-        String key = clientAddress.getHostAddress();
+        String key = getCanonicalAddressKey(clientAddress);
 
         synchronized (this) {
             Integer perIp = reservationsPerIp.get(key);
             if (perIp != null && perIp >= maxPerIp) {
-                throw new DataConnectionException("Maximum passive connections reached for " + key);
+                throw new DataConnectionException("Maximum passive connections reached for " +
+                        clientAddress.getHostAddress());
             }
 
             int port = selectPort();
@@ -197,12 +232,18 @@ public class PassiveConnectionService {
             }
 
             if (perPort.containsKey(key)) {
-                throw new DataConnectionException("Passive port already pending for " + key);
+                throw new DataConnectionException("Passive port already pending for " +
+                        clientAddress.getHostAddress());
             }
 
             Reservation reservation = new Reservation(port, clientAddress);
             perPort.put(key, reservation);
             reservationsPerIp.put(key, perIp == null ? 1 : perIp + 1);
+
+            // Update metrics
+            totalReservations.incrementAndGet();
+            activeReservations.incrementAndGet();
+
             return reservation;
         }
     }
@@ -215,11 +256,15 @@ public class PassiveConnectionService {
         synchronized (this) {
             Map<String, Reservation> perPort = pendingByPort.get(reservation.getPort());
             if (perPort != null) {
-                String key = reservation.getClientAddress().getHostAddress();
+                String key = getCanonicalAddressKey(reservation.getClientAddress());
                 Reservation removed = perPort.remove(key);
                 if (removed != null) {
                     decrementPerIp(key);
                     removed.cancel();
+
+                    // Update metrics
+                    activeReservations.decrementAndGet();
+                    cancelledReservations.incrementAndGet();
                 }
             }
         }
@@ -239,7 +284,7 @@ public class PassiveConnectionService {
 
     private int selectPort() {
         // simple round-robin selection
-        int index = nextPortIndex++ % ports.size();
+        int index = nextPortIndex.getAndIncrement() % ports.size();
         if (index < 0) {
             index += ports.size();
         }
@@ -280,7 +325,7 @@ public class PassiveConnectionService {
 
     private void handleAccepted(int port, Socket socket) {
         InetAddress remoteAddress = ((InetSocketAddress) socket.getRemoteSocketAddress()).getAddress();
-        String key = remoteAddress.getHostAddress();
+        String key = getCanonicalAddressKey(remoteAddress);
         Reservation reservation;
 
         synchronized (this) {
@@ -288,13 +333,22 @@ public class PassiveConnectionService {
             reservation = perPort != null ? perPort.remove(key) : null;
             if (reservation != null) {
                 decrementPerIp(key);
+                activeReservations.decrementAndGet();
             }
         }
 
         try {
             if (reservation != null && !reservation.isCancelled()) {
                 reservation.complete(socket);
+                totalConnections.incrementAndGet();
             } else {
+                // Log security event: unexpected connection
+                if (LOG.isWarnEnabled()) {
+                    LOG.warn("Rejected passive data connection from unexpected IP {} on port {} "
+                                    + "(no matching reservation)",
+                            remoteAddress.getHostAddress(), port);
+                }
+                rejectedConnections.incrementAndGet();
                 socket.close();
             }
         } catch (Exception e) {
@@ -304,5 +358,39 @@ public class PassiveConnectionService {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    /**
+     * Returns a canonical key for an IP address that handles IPv6 normalization.
+     * Uses Base64-encoded byte representation to ensure different string representations
+     * of the same IPv6 address (e.g., "::1" and "0:0:0:0:0:0:0:1") map to the same key.
+     *
+     * @param address the IP address
+     * @return canonical key for use in maps
+     */
+    private String getCanonicalAddressKey(InetAddress address) {
+        return Base64.getEncoder().encodeToString(address.getAddress());
+    }
+
+    // Public metric accessors for monitoring/statistics
+
+    public long getTotalReservations() {
+        return totalReservations.get();
+    }
+
+    public int getActiveReservations() {
+        return activeReservations.get();
+    }
+
+    public long getTotalConnections() {
+        return totalConnections.get();
+    }
+
+    public long getRejectedConnections() {
+        return rejectedConnections.get();
+    }
+
+    public long getCancelledReservations() {
+        return cancelledReservations.get();
     }
 }
