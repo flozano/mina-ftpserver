@@ -106,6 +106,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             dataSoc = null;
         }
 
+        DataConnectionConfiguration dcc = null;
+        if (session != null && session.getListener() != null) {
+            dcc = session.getListener().getDataConnectionConfiguration();
+        }
+
         // close server socket if any
         if (servSoc != null) {
             try {
@@ -113,25 +118,24 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             } catch (Exception ex) {
                 LOG.warn("FtpDataConnection.closeDataSocket()", ex);
             }
-
-            if (session != null) {
-                DataConnectionConfiguration dcc = session.getListener().getDataConnectionConfiguration();
-
-                if (dcc != null) {
-                    if (isMultiplexEnabled(dcc)) {
-                        if (passiveConnectionService != null && passiveReservation != null) {
-                            passiveConnectionService.cancel(passiveReservation);
-                        }
-                    } else {
-                        dcc.releasePassivePort(port);
-                    }
-                }
-            }
-
             servSoc = null;
-            passiveReservation = null;
-            passiveConnectionService = null;
         }
+
+        // Always clean pending passive reservation/port even if no server socket is present.
+        if (dcc != null && passive) {
+            if (isMultiplexEnabled(dcc)) {
+                if (passiveConnectionService != null && passiveReservation != null) {
+                    passiveConnectionService.cancel(passiveReservation);
+                }
+            } else if (port > 0) {
+                dcc.releasePassivePort(port);
+            }
+        }
+
+        passiveReservation = null;
+        passiveConnectionService = null;
+        passive = false;
+        port = 0;
 
         // reset request time
         requestTime = 0L;
@@ -208,8 +212,10 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
             if (passivePort == -1) {
                 servSoc = null;
+                port = 0;
                 throw new DataConnectionException("Cannot find an available passive port.");
             }
+            port = passivePort;
 
             // open passive server socket and get parameters
             if (secure) {
