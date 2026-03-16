@@ -364,12 +364,36 @@ public class PassiveConnectionService {
      * Returns a canonical key for an IP address that handles IPv6 normalization.
      * Uses Base64-encoded byte representation to ensure different string representations
      * of the same IPv6 address (e.g., "::1" and "0:0:0:0:0:0:0:1") map to the same key.
+     * Also normalizes IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) to raw IPv4 bytes so
+     * control/data sockets reported by different address families still match.
      *
      * @param address the IP address
      * @return canonical key for use in maps
      */
     private String getCanonicalAddressKey(InetAddress address) {
-        return Base64.getEncoder().encodeToString(address.getAddress());
+        return Base64.getEncoder().encodeToString(normalizeAddressBytes(address.getAddress()));
+    }
+
+    private byte[] normalizeAddressBytes(byte[] rawAddress) {
+        if (isIpv4MappedIpv6(rawAddress)) {
+            byte[] ipv4 = new byte[4];
+            System.arraycopy(rawAddress, 12, ipv4, 0, 4);
+            return ipv4;
+        }
+        return rawAddress;
+    }
+
+    private boolean isIpv4MappedIpv6(byte[] rawAddress) {
+        if (rawAddress == null || rawAddress.length != 16) {
+            return false;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            if (rawAddress[i] != 0) {
+                return false;
+            }
+        }
+        return rawAddress[10] == (byte) 0xFF && rawAddress[11] == (byte) 0xFF;
     }
 
     // Public metric accessors for monitoring/statistics

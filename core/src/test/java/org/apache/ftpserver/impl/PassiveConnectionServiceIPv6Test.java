@@ -201,37 +201,50 @@ public class PassiveConnectionServiceIPv6Test {
     }
 
     @Test
-    public void testIPv6MappedIPv4Address() throws Exception {
-        // IPv6-mapped IPv4 addresses (::ffff:127.0.0.1) may be resolved
-        // to native IPv4 by some systems - test handles both cases
-        if (!isIPv6Available()) {
-            return;
-        }
-
+    public void testIPv6MappedIPv4IsSameReservationKeyAsIPv4() throws Exception {
         int port = randomPort();
         service = new PassiveConnectionService(Collections.singleton(port), null);
         service.start();
 
+        InetAddress ipv4 = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
+        InetAddress ipv6Mapped = createMappedIpv4Address(127, 0, 0, 1);
+
+        PassiveConnectionService.Reservation reservation = service.register(ipv4);
+        assertNotNull(reservation);
+
         try {
-            InetAddress ipv4 = InetAddress.getByName("127.0.0.1");
-            InetAddress ipv6Mapped = InetAddress.getByName("::ffff:127.0.0.1");
-
-            PassiveConnectionService.Reservation res1 = service.register(ipv4);
-
-            // If system resolves ::ffff:127.0.0.1 to IPv4, this will fail
-            // If it treats them as different, this will succeed
-            try {
-                PassiveConnectionService.Reservation res2 = service.register(ipv6Mapped);
-                // If we get here, they're treated as different addresses
-                assertNotNull(res1);
-                assertNotNull(res2);
-            } catch (DataConnectionException e) {
-                // System resolves ::ffff:127.0.0.1 to 127.0.0.1, which is fine
-                // This shows normalization is working correctly
-            }
-        } catch (UnknownHostException e) {
-            // Some systems don't support IPv6-mapped addresses, skip test
+            service.register(ipv6Mapped);
+            fail("Expected DataConnectionException for IPv4-mapped IPv6 duplicate reservation");
+        } catch (DataConnectionException expected) {
+            // expected
         }
+
+        FakeSocket socket = new FakeSocket(ipv6Mapped);
+        service.deliverAccepted(port, socket);
+
+        Socket delivered = reservation.await(500);
+        assertNotNull("IPv4 reservation should match IPv4-mapped IPv6 accepted socket", delivered);
+        assertEquals(socket, delivered);
+    }
+
+    @Test
+    public void testIPv4ConnectionMatchesIPv6MappedIPv4Reservation() throws Exception {
+        int port = randomPort();
+        service = new PassiveConnectionService(Collections.singleton(port), null);
+        service.start();
+
+        InetAddress ipv4 = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
+        InetAddress ipv6Mapped = createMappedIpv4Address(127, 0, 0, 1);
+
+        PassiveConnectionService.Reservation reservation = service.register(ipv6Mapped);
+        assertNotNull(reservation);
+
+        FakeSocket socket = new FakeSocket(ipv4);
+        service.deliverAccepted(port, socket);
+
+        Socket delivered = reservation.await(500);
+        assertNotNull("IPv4-mapped IPv6 reservation should match IPv4 accepted socket", delivered);
+        assertEquals(socket, delivered);
     }
 
     private boolean isIPv6Available() {
@@ -247,6 +260,17 @@ public class PassiveConnectionServiceIPv6Test {
         try (ServerSocket ss = new ServerSocket(0)) {
             return ss.getLocalPort();
         }
+    }
+
+    private InetAddress createMappedIpv4Address(int a, int b, int c, int d) throws UnknownHostException {
+        byte[] mapped = new byte[16];
+        mapped[10] = (byte) 0xFF;
+        mapped[11] = (byte) 0xFF;
+        mapped[12] = (byte) a;
+        mapped[13] = (byte) b;
+        mapped[14] = (byte) c;
+        mapped[15] = (byte) d;
+        return Inet6Address.getByAddress(null, mapped, -1);
     }
 
     private static class FakeSocket extends Socket {
