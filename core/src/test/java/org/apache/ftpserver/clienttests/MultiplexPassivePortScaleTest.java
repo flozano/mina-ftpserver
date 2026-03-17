@@ -250,7 +250,11 @@ public class MultiplexPassivePortScaleTest extends ClientTestTemplate {
     private static String contentFor(int clientId) {
         String marker = "client=" + clientId + ";nonce=" + UUID.nameUUIDFromBytes(
                 ("seed-" + clientId).getBytes(StandardCharsets.UTF_8));
-        return (marker + "\n").repeat(128);
+        StringBuilder sb = new StringBuilder((marker.length() + 1) * 128);
+        for (int i = 0; i < 128; i++) {
+            sb.append(marker).append('\n');
+        }
+        return sb.toString();
     }
 
     private static void writeFile(File file, String content) throws IOException {
@@ -365,6 +369,39 @@ public class MultiplexPassivePortScaleTest extends ClientTestTemplate {
         }
     }
 
-    private record ClientDownloadResult(int clientId, String ip, String fileName, String expectedSha, String actualSha) {
+    private static final class ClientDownloadResult {
+        private final int clientId;
+        private final String ip;
+        private final String fileName;
+        private final String expectedSha;
+        private final String actualSha;
+
+        private ClientDownloadResult(int clientId, String ip, String fileName, String expectedSha, String actualSha) {
+            this.clientId = clientId;
+            this.ip = ip;
+            this.fileName = fileName;
+            this.expectedSha = expectedSha;
+            this.actualSha = actualSha;
+        }
+
+        private int clientId() {
+            return clientId;
+        }
+
+        private String ip() {
+            return ip;
+        }
+
+        private String fileName() {
+            return fileName;
+        }
+
+        private String expectedSha() {
+            return expectedSha;
+        }
+
+        private String actualSha() {
+            return actualSha;
+        }
     }
 }

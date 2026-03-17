@@ -54,6 +54,7 @@ public class PassiveConnectionService {
         private final InetAddress clientAddress;
         private final CountDownLatch latch = new CountDownLatch(1);
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final AtomicBoolean timedOut = new AtomicBoolean(false);
         private volatile Socket socket;
 
         Reservation(int port, InetAddress clientAddress) {
@@ -72,6 +73,10 @@ public class PassiveConnectionService {
         void complete(Socket socket) {
             this.socket = socket;
             latch.countDown();
+            if (isCancelled() || timedOut.get()) {
+                closeQuietly(socket);
+                this.socket = null;
+            }
         }
 
         Socket await(long timeoutMillis) throws DataConnectionException {
@@ -82,6 +87,12 @@ public class PassiveConnectionService {
 
             try {
                 if (!latch.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                    timedOut.set(true);
+                    Socket lateSocket = socket;
+                    if (lateSocket != null) {
+                        closeQuietly(lateSocket);
+                        socket = null;
+                    }
                     return null;
                 }
             } catch (InterruptedException e) {
@@ -89,23 +100,44 @@ public class PassiveConnectionService {
                 throw new DataConnectionException("Interrupted while waiting for passive data connection", e);
             }
 
+            if (isCancelled()) {
+                Socket cancelledSocket = socket;
+                if (cancelledSocket != null) {
+                    closeQuietly(cancelledSocket);
+                    socket = null;
+                }
+                return null;
+            }
             return socket;
         }
 
         boolean cancel() {
             boolean result = cancelled.compareAndSet(false, true);
             latch.countDown();
+            Socket cancelledSocket = socket;
+            if (cancelledSocket != null) {
+                closeQuietly(cancelledSocket);
+                socket = null;
+            }
             return result;
         }
 
         boolean isCancelled() {
             return cancelled.get();
         }
+
+        private void closeQuietly(Socket socket) {
+            try {
+                socket.close();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private final List<Integer> ports;
     private final InetAddress bindAddress;
     private final int maxPerIp;
+    private final int maxTotalReservations;
     private final int acceptTimeoutMillis;
     private final Map<Integer, ServerSocket> listeners = new HashMap<>();
     private final Map<Integer, Thread> listenerThreads = new HashMap<>();
@@ -126,6 +158,11 @@ public class PassiveConnectionService {
     }
 
     public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis) {
+        this(ports, bindAddress, acceptTimeoutMillis, defaultMaxTotalReservations(ports));
+    }
+
+    public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis,
+            int maxTotalReservations) {
         if (ports == null || ports.isEmpty()) {
             throw new IllegalArgumentException("Passive ports are required");
         }
@@ -134,6 +171,11 @@ public class PassiveConnectionService {
                     "Accept timeout must be between 100 and 10000 milliseconds (recommended: 1000-5000). " +
                     "Got: " + acceptTimeoutMillis);
         }
+        if (maxTotalReservations < ports.size()) {
+            throw new IllegalArgumentException(
+                    "Maximum total reservations must be >= passive port count. Got " + maxTotalReservations +
+                            " for " + ports.size() + " ports");
+        }
         if (ports.size() < 5) {
             LOG.warn("Passive port range is small ({}). Recommended: at least 5 ports for adequate concurrency. " +
                     "Each port can serve one connection per unique client IP.", ports.size());
@@ -141,6 +183,7 @@ public class PassiveConnectionService {
         this.ports = Collections.unmodifiableList(new ArrayList<>(ports));
         this.bindAddress = bindAddress;
         this.maxPerIp = ports.size();
+        this.maxTotalReservations = maxTotalReservations;
         this.acceptTimeoutMillis = acceptTimeoutMillis;
 
         // prepare pending maps so register() can be used before start() in tests
@@ -155,9 +198,11 @@ public class PassiveConnectionService {
         }
 
         for (int port : ports) {
+            ServerSocket serverSocket = null;
             try {
-                ServerSocket serverSocket = new ServerSocket(port, 0, bindAddress);
+                serverSocket = new ServerSocket();
                 serverSocket.setReuseAddress(true);
+                serverSocket.bind(new InetSocketAddress(bindAddress, port), 0);
                 serverSocket.setSoTimeout(acceptTimeoutMillis);
                 listeners.put(port, serverSocket);
 
@@ -166,6 +211,12 @@ public class PassiveConnectionService {
                 t.start();
                 listenerThreads.put(port, t);
             } catch (Exception e) {
+                if (serverSocket != null) {
+                    try {
+                        serverSocket.close();
+                    } catch (Exception ignored) {
+                    }
+                }
                 stop();
                 throw new IllegalStateException("Failed to bind passive port " + port, e);
             }
@@ -218,6 +269,10 @@ public class PassiveConnectionService {
         String key = getCanonicalAddressKey(clientAddress);
 
         synchronized (this) {
+            if (activeReservations.get() >= maxTotalReservations) {
+                throw new DataConnectionException("Maximum total passive reservations reached");
+            }
+
             Integer perIp = reservationsPerIp.get(key);
             if (perIp != null && perIp >= maxPerIp) {
                 throw new DataConnectionException("Maximum passive connections reached for " +
@@ -253,6 +308,7 @@ public class PassiveConnectionService {
             return;
         }
 
+        Reservation toCancel = reservation;
         synchronized (this) {
             Map<String, Reservation> perPort = pendingByPort.get(reservation.getPort());
             if (perPort != null) {
@@ -260,7 +316,7 @@ public class PassiveConnectionService {
                 Reservation removed = perPort.remove(key);
                 if (removed != null) {
                     decrementPerIp(key);
-                    removed.cancel();
+                    toCancel = removed;
 
                     // Update metrics
                     activeReservations.decrementAndGet();
@@ -268,6 +324,7 @@ public class PassiveConnectionService {
                 }
             }
         }
+        toCancel.cancel();
     }
 
     private void decrementPerIp(String key) {
@@ -416,5 +473,17 @@ public class PassiveConnectionService {
 
     public long getCancelledReservations() {
         return cancelledReservations.get();
+    }
+
+    int getMaxTotalReservations() {
+        return maxTotalReservations;
+    }
+
+    private static int defaultMaxTotalReservations(Set<Integer> ports) {
+        if (ports == null || ports.isEmpty()) {
+            return 0;
+        }
+        // Conservative cap to prevent unbounded growth while allowing large multi-tenant loads.
+        return ports.size() * 4096;
     }
 }

@@ -150,9 +150,13 @@ public class NioListener extends AbstractListener {
 
                 org.apache.ftpserver.impl.DefaultDataConnectionConfiguration cfg =
                         (org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) getDataConnectionConfiguration();
+                int maxTotalReservations = cfg.getMaxTotalPassiveReservations();
                 org.apache.ftpserver.impl.PassiveConnectionService pcs =
-                    new org.apache.ftpserver.impl.PassiveConnectionService(
-                        cfg.getPassivePortSet(), passiveBindAddress);
+                    maxTotalReservations > 0
+                            ? new org.apache.ftpserver.impl.PassiveConnectionService(
+                                    cfg.getPassivePortSet(), passiveBindAddress, 1000, maxTotalReservations)
+                            : new org.apache.ftpserver.impl.PassiveConnectionService(
+                                    cfg.getPassivePortSet(), passiveBindAddress);
                 pcs.start();
                 setPassiveConnectionService(pcs);
             }

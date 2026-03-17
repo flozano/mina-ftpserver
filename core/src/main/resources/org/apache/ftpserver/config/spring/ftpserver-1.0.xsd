@@ -141,6 +141,8 @@
                   <xs:attribute name="external-address" />
                   <xs:attribute name="ip-check" type="xs:boolean" />
                   <xs:attribute name="ports" />
+                  <xs:attribute name="multiplex-ports" type="xs:boolean" />
+                  <xs:attribute name="max-total-reservations" type="xs:int" />
                 </xs:complexType>
               </xs:element>
             </xs:sequence>

@@ -19,6 +19,11 @@
 package org.apache.ftpserver.impl;
 
 import org.apache.ftpserver.DataConnectionException;
+import org.apache.ftpserver.DataConnectionConfigurationFactory;
+import org.apache.ftpserver.FtpServer;
+import org.apache.ftpserver.FtpServerFactory;
+import org.apache.ftpserver.listener.Listener;
+import org.apache.ftpserver.listener.ListenerFactory;
 import org.junit.After;
 import org.junit.Test;
 
@@ -27,7 +32,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashSet;
 import java.util.Collections;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -78,6 +85,57 @@ public class PassiveConnectionServiceConfigTest {
         } catch (IllegalArgumentException expected) {
             // expected
         }
+    }
+
+    @Test
+    public void invalidGlobalReservationCapRejected() throws Exception {
+        Set<Integer> ports = new HashSet<>();
+        ports.add(randomPort());
+        ports.add(randomPort());
+        try {
+            service = new PassiveConnectionService(ports, null, 1000, 1);
+            fail("Should reject global cap smaller than passive port count");
+        } catch (IllegalArgumentException expected) {
+            // expected
+        }
+    }
+
+    @Test
+    public void defaultGlobalReservationCapScalesWithPortCount() throws Exception {
+        Set<Integer> ports = new HashSet<>();
+        ports.add(randomPort());
+        ports.add(randomPort());
+        ports.add(randomPort());
+
+        service = new PassiveConnectionService(ports, null, 1000);
+
+        assertEquals(ports.size() * 4096, service.getMaxTotalReservations());
+    }
+
+    @Test
+    public void globalReservationCapIsEnforcedAcrossIps() throws Exception {
+        int port = randomPort();
+        service = new PassiveConnectionService(Collections.singleton(port), null, 1000, 1);
+        service.start();
+
+        InetAddress client1 = InetAddress.getByName("127.0.0.1");
+        InetAddress client2 = InetAddress.getByName("127.0.0.2");
+
+        PassiveConnectionService.Reservation res1 = service.register(client1);
+        assertNotNull(res1);
+
+        try {
+            service.register(client2);
+            fail("Should enforce max total passive reservations");
+        } catch (DataConnectionException expected) {
+            // expected
+        }
+
+        service.cancel(res1);
+
+        PassiveConnectionService.Reservation res2 = service.register(client2);
+        assertNotNull(res2);
+        service.cancel(res2);
     }
 
     @Test
@@ -169,6 +227,34 @@ public class PassiveConnectionServiceConfigTest {
         assertEquals(5, service.getTotalConnections());
         assertEquals(0, service.getActiveReservations());
         assertEquals(0, service.getCancelledReservations());
+    }
+
+    @Test
+    public void listenerUsesConfiguredGlobalReservationCap() throws Exception {
+        int passivePort = randomPort();
+        int configuredCap = 123;
+
+        FtpServerFactory serverFactory = new FtpServerFactory();
+        ListenerFactory listenerFactory = new ListenerFactory(serverFactory.getListener("default"));
+        listenerFactory.setPort(0);
+
+        DataConnectionConfigurationFactory dc = new DataConnectionConfigurationFactory();
+        dc.setPassivePorts(String.valueOf(passivePort));
+        dc.setMultiplexPassivePorts(true);
+        dc.setMaxTotalPassiveReservations(configuredCap);
+        listenerFactory.setDataConnectionConfiguration(dc.createDataConnectionConfiguration());
+        Listener listener = listenerFactory.createListener();
+        serverFactory.addListener("default", listener);
+
+        FtpServer server = serverFactory.createServer();
+        try {
+            server.start();
+            service = listener.getPassiveConnectionService();
+            assertNotNull(service);
+            assertEquals(configuredCap, service.getMaxTotalReservations());
+        } finally {
+            server.stop();
+        }
     }
 
     private int randomPort() throws IOException {
