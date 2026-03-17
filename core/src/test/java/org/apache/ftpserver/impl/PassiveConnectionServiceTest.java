@@ -239,6 +239,27 @@ public class PassiveConnectionServiceTest {
     }
 
     @Test
+    public void lateAcceptAfterTimeoutIsClosedOnCancel() throws Exception {
+        int port = randomPort();
+        service = new PassiveConnectionService(Collections.singleton(port), null);
+        service.start();
+
+        InetAddress client = InetAddress.getByName("127.0.0.1");
+        PassiveConnectionService.Reservation reservation = service.register(client);
+
+        Socket awaited = reservation.await(1);
+        assertNull("Reservation should timeout", awaited);
+
+        FakeSocket lateSocket = new FakeSocket(client);
+        lateSocket.setCloseTracking(true);
+        service.deliverAccepted(port, lateSocket);
+
+        service.cancel(reservation);
+
+        assertEquals("Late socket should be closed to avoid leak", 1, lateSocket.closeCalls);
+    }
+
+    @Test
     public void portExhaustion() throws Exception {
         // Create service with only 2 ports
         Set<Integer> ports = new HashSet<>();
