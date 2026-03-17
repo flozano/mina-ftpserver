@@ -132,6 +132,7 @@ public class MultiplexPassivePortTLSTest extends ClientTestTemplate {
                 c.login(ADMIN_USERNAME, ADMIN_PASSWORD);
 
                 // Enable TLS on data channel
+                c.execPBSZ(0);
                 c.execPROT("P");
                 c.enterLocalPassiveMode();
                 c.setRemoteVerificationEnabled(false);
@@ -188,6 +189,7 @@ public class MultiplexPassivePortTLSTest extends ClientTestTemplate {
                 c.connect("127.0.0.1", getListenerPort());
                 c.execAUTH("TLS");
                 c.login(ADMIN_USERNAME, ADMIN_PASSWORD);
+                c.execPBSZ(0);
                 c.execPROT("P");
                 c.enterLocalPassiveMode();
                 c.setRemoteVerificationEnabled(false);
