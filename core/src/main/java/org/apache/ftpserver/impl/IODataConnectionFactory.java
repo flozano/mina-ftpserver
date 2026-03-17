@@ -428,7 +428,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     InetAddress remoteAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
                     InetAddress dataSocketAddress = dataSoc.getInetAddress();
 
-                    if (!dataSocketAddress.equals(remoteAddress)) {
+                    if (!isSameAddressForPassiveIpCheck(remoteAddress, dataSocketAddress)) {
                         LOG.warn("Passive IP Check failed. Closing data connection from " + dataSocketAddress +
                             " as it does not match the expected address " + remoteAddress);
                         closeDataConnection();
@@ -501,6 +501,42 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             return ((DefaultDataConnectionConfiguration) cfg).isMultiplexPassivePorts();
         }
         return false;
+    }
+
+    /**
+     * Compare client addresses for passive IP checks while handling IPv4-mapped IPv6.
+     * This avoids rejecting valid connections where control and data sockets use
+     * different address-family representations of the same endpoint.
+     */
+    static boolean isSameAddressForPassiveIpCheck(InetAddress expected, InetAddress actual) {
+        if (expected == null || actual == null) {
+            return false;
+        }
+        byte[] expectedBytes = normalizeMappedIpv4(expected.getAddress());
+        byte[] actualBytes = normalizeMappedIpv4(actual.getAddress());
+        return java.util.Arrays.equals(expectedBytes, actualBytes);
+    }
+
+    private static byte[] normalizeMappedIpv4(byte[] raw) {
+        if (isIpv4MappedIpv6(raw)) {
+            byte[] ipv4 = new byte[4];
+            System.arraycopy(raw, 12, ipv4, 0, 4);
+            return ipv4;
+        }
+        return raw;
+    }
+
+    private static boolean isIpv4MappedIpv6(byte[] raw) {
+        if (raw == null || raw.length != 16) {
+            return false;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            if (raw[i] != 0) {
+                return false;
+            }
+        }
+        return raw[10] == (byte) 0xFF && raw[11] == (byte) 0xFF;
     }
 
     /**
