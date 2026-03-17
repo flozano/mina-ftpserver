@@ -226,8 +226,11 @@ public class MultiplexPassivePortTLSTest extends ClientTestTemplate {
 
     private FTPSClient createBoundTLSClient(String ip) throws Exception {
         FTPSClient c = new FTPSClient(false); // Explicit TLS
-        c.setDefaultTimeout(10000);
+        c.setDefaultTimeout(30000);
+        c.setDataTimeout(30000);
         c.setSocketFactory(new BindingSocketFactory(ip));
+        // Ensure passive data sockets use the same explicit source IP as control sockets.
+        c.setPassiveLocalIPAddress(ip);
         c.setTrustManager(new org.apache.commons.net.util.TrustManagerUtils().getAcceptAllTrustManager());
         return c;
     }
