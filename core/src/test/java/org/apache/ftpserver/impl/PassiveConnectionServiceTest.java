@@ -400,15 +400,25 @@ public class PassiveConnectionServiceTest {
 
     @Test
     public void largePortSet() throws Exception {
-        // Test with many ports to verify no performance issues
-        Set<Integer> ports = new HashSet<>();
-        int basePort = 50000;
-        for (int i = 0; i < 50; i++) {
-            ports.add(basePort + i);
+        // Test with many ports to verify no performance issues.
+        // Use random ports instead of a fixed range to avoid sporadic bind collisions on CI hosts.
+        IllegalStateException lastBindError = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            Set<Integer> ports = randomPorts(50);
+            service = new PassiveConnectionService(ports, null);
+            try {
+                service.start();
+                lastBindError = null;
+                break;
+            } catch (IllegalStateException e) {
+                lastBindError = e;
+                service.stop();
+                service = null;
+            }
         }
-
-        service = new PassiveConnectionService(ports, null);
-        service.start();
+        if (lastBindError != null) {
+            throw lastBindError;
+        }
 
         InetAddress client = InetAddress.getByName("127.0.0.1");
 
@@ -430,6 +440,14 @@ public class PassiveConnectionServiceTest {
         try (ServerSocket ss = new ServerSocket(0)) {
             return ss.getLocalPort();
         }
+    }
+
+    private Set<Integer> randomPorts(int count) throws IOException {
+        Set<Integer> ports = new HashSet<>();
+        while (ports.size() < count) {
+            ports.add(randomPort());
+        }
+        return ports;
     }
 
     private static class FakeSocket extends Socket {
