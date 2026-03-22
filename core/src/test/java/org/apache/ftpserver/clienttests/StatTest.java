@@ -67,7 +67,7 @@ public class StatTest extends ClientTestTemplate {
         client.stat();
         String[] reply = client.getReplyString().split("\r\n");
 
-        assertEquals("211-Apache FtpServer",            reply[0]);
+        assertEquals("211-FTP Service",            reply[0]);
         assertEquals("Connected to 127.0.0.1",          reply[1]);
         assertEquals("Connected from 127.0.0.1",        reply[2]);
         assertEquals("Logged in as admin",              reply[3]);

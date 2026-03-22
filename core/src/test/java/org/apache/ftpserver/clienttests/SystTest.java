@@ -43,7 +43,7 @@ public class SystTest extends ClientTestTemplate {
     public void testSyst() throws Exception {
         assertTrue(FTPReply.isPositiveCompletion(client.syst()));
         // hardcoded to Unix as that's the type of list etc we use
-        assertEquals("215 UNIX Type: Apache FtpServer", client.getReplyString()
+        assertEquals("215 UNIX Type: FTP Service", client.getReplyString()
                 .trim());
     }
 

@@ -150,6 +150,10 @@ public class PASS extends AbstractCommand {
                 if (session.getRemoteAddress() instanceof InetSocketAddress) {
                     userMetadata.setInetAddress(((InetSocketAddress) session.getRemoteAddress()).getAddress());
                 }
+                if (session.getLocalAddress() instanceof InetSocketAddress localAddr) {
+                    userMetadata.setLocalPort(localAddr.getPort());
+                }
+                userMetadata.setSecure(session.isSecure());
 
                 userMetadata.setCertificateChain(session.getClientCertificates());
 
