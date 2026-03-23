@@ -62,6 +62,8 @@ public class ListenerFactory {
      */
     private SessionFilter sessionFilter = null;
 
+    private boolean proxyProtocol = false;
+
     /**
      * Default constructor
      */
@@ -85,6 +87,7 @@ public class ListenerFactory {
         blockedAddresses = listener.getBlockedAddresses();
         blockedSubnets = listener.getBlockedSubnets();
         this.sessionFilter = listener.getSessionFilter();
+        this.proxyProtocol = listener.isProxyProtocol();
     }
 
     /**
@@ -112,7 +115,8 @@ public class ListenerFactory {
                     blockedSubnets);
         } else {
             return new NioListener(serverAddress, port, implicitSsl, ssl,
-                    dataConnectionConfig, idleTimeout, sessionFilter);
+                    dataConnectionConfig, idleTimeout, sessionFilter,
+                    proxyProtocol);
         }
     }
 
@@ -298,5 +302,23 @@ public class ListenerFactory {
      */
     public void setSessionFilter(SessionFilter sessionFilter) {
         this.sessionFilter = sessionFilter;
+    }
+
+    /**
+     * Returns whether PROXY Protocol v2 auto-detection is enabled.
+     *
+     * @return true if PROXY Protocol v2 is enabled
+     */
+    public boolean isProxyProtocol() {
+        return proxyProtocol;
+    }
+
+    /**
+     * Enable or disable best-effort HAProxy PROXY Protocol v2 detection.
+     *
+     * @param proxyProtocol true to enable PROXY Protocol v2 detection
+     */
+    public void setProxyProtocol(boolean proxyProtocol) {
+        this.proxyProtocol = proxyProtocol;
     }
 }
