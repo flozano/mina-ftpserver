@@ -393,14 +393,17 @@ public class PassiveConnectionService {
 
         if (proxyProtocol) {
             try {
-                ProxyProtocolResult result = ProxyProtocolParser.parseFromSocket(socket);
-                if (result != null && !result.local() && result.sourceAddress() != null) {
-                    remoteAddress = result.sourceAddress().getAddress();
-                    LOG.debug("Data connection PROXY v2: client={} (socket={})", remoteAddress.getHostAddress(),
-                            socket.getInetAddress().getHostAddress());
+                ProxyAwareSocket proxySocket = new ProxyAwareSocket(socket);
+                if (proxySocket.getProxyResult() != null) {
+                    LOG.debug("Data connection PROXY v2: client={} (socket={})",
+                            proxySocket.getInetAddress().getHostAddress(),
+                            proxySocket.getOriginalInetAddress().getHostAddress());
                 }
+                socket = proxySocket;
+                remoteAddress = socket.getInetAddress();
             } catch (Exception e) {
-                LOG.warn("Failed to parse PROXY protocol on data connection from {}", remoteAddress.getHostAddress(), e);
+                LOG.warn("Failed PROXY protocol detection on data connection from {}",
+                        remoteAddress.getHostAddress(), e);
             }
         }
 
