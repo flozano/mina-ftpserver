@@ -360,6 +360,15 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                         Socket serverSocket = servSoc.accept();
 
+                        // Parse PROXY header before TLS wrapping (header comes before TLS handshake)
+                        if (session.getListener().isProxyProtocol()) {
+                            try {
+                                ProxyProtocolParser.parseFromSocket(serverSocket);
+                            } catch (Exception e) {
+                                LOG.debug("Failed to parse PROXY on secure data connection", e);
+                            }
+                        }
+
                         SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
                             serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
                         sslSocket.setUseClientMode(false);
@@ -382,7 +391,18 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                         acceptedSocket = dataSoc;
                     } else {
                         LOG.debug("Opening passive data connection");
-                        acceptedSocket = servSoc.accept();
+                        Socket rawSocket = servSoc.accept();
+
+                        // Parse and strip PROXY header if present
+                        if (session.getListener().isProxyProtocol()) {
+                            try {
+                                ProxyProtocolParser.parseFromSocket(rawSocket);
+                            } catch (Exception e) {
+                                LOG.debug("Failed to parse PROXY on data connection", e);
+                            }
+                        }
+
+                        acceptedSocket = rawSocket;
                     }
                 }
 
@@ -422,9 +442,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     dataSoc = acceptedSocket;
                 }
 
-                if (dataConfig.isPassiveIpCheck()) {
-                    // Let's make sure we got the connection from the same
-                    // client that we are expecting
+                if (dataConfig.isPassiveIpCheck() && !session.getListener().isProxyProtocol()) {
+                    // When proxy protocol is active, the socket address doesn't match
+                    // the PROXY-provided client address — skip the check.
                     InetAddress remoteAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
                     InetAddress dataSocketAddress = dataSoc.getInetAddress();
 

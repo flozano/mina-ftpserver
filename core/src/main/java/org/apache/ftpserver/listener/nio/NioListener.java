@@ -160,9 +160,13 @@ public class NioListener extends AbstractListener {
                 org.apache.ftpserver.impl.PassiveConnectionService pcs =
                     maxTotalReservations > 0
                             ? new org.apache.ftpserver.impl.PassiveConnectionService(
-                                    cfg.getPassivePortSet(), passiveBindAddress, 1000, maxTotalReservations)
+                                    cfg.getPassivePortSet(), passiveBindAddress, 1000, maxTotalReservations,
+                                    isProxyProtocol())
                             : new org.apache.ftpserver.impl.PassiveConnectionService(
-                                    cfg.getPassivePortSet(), passiveBindAddress);
+                                    cfg.getPassivePortSet(), passiveBindAddress, 1000,
+                                    org.apache.ftpserver.impl.PassiveConnectionService.defaultMaxTotalReservations(
+                                            cfg.getPassivePortSet()),
+                                    isProxyProtocol());
                 pcs.start();
                 setPassiveConnectionService(pcs);
             }
@@ -218,7 +222,10 @@ public class NioListener extends AbstractListener {
             }
 
             if (isProxyProtocol()) {
+                LOG.info("Adding PROXY Protocol v2 filter to listener on port {}", getPort());
                 acceptor.getFilterChain().addFirst("proxyProtocol", new ProxyProtocolFilter());
+            } else {
+                LOG.info("PROXY Protocol NOT enabled for listener on port {}", getPort());
             }
 
             handler.init(context, this);

@@ -58,6 +58,9 @@ public class ProxyProtocolFilter extends IoFilterAdapter {
 
 	@Override
 	public void messageReceived(NextFilter nextFilter, IoSession session, Object message) throws Exception {
+		LOG.debug("ProxyProtocolFilter.messageReceived: message type={}, state={}",
+				message != null ? message.getClass().getSimpleName() : "null",
+				session.getAttribute(ATTR_STATE));
 		if (!(message instanceof IoBuffer incoming)) {
 			nextFilter.messageReceived(session, message);
 			return;
