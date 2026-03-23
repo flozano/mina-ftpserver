@@ -112,4 +112,8 @@ public class MyCustomListener implements Listener {
     public org.apache.ftpserver.impl.PassiveConnectionService getPassiveConnectionService() {
         return null;
     }
+
+    public boolean isProxyProtocol() {
+        return false;
+    }
 }
