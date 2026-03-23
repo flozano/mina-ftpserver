@@ -360,13 +360,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                         Socket serverSocket = servSoc.accept();
 
-                        // Parse PROXY header before TLS wrapping (header comes before TLS handshake)
+                        // Best-effort PROXY header detection before TLS wrapping
                         if (session.getListener().isProxyProtocol()) {
-                            try {
-                                ProxyProtocolParser.parseFromSocket(serverSocket);
-                            } catch (Exception e) {
-                                LOG.debug("Failed to parse PROXY on secure data connection", e);
-                            }
+                            serverSocket = new ProxyAwareSocket(serverSocket);
                         }
 
                         SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
@@ -393,13 +389,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                         LOG.debug("Opening passive data connection");
                         Socket rawSocket = servSoc.accept();
 
-                        // Parse and strip PROXY header if present
+                        // Best-effort PROXY header detection
                         if (session.getListener().isProxyProtocol()) {
-                            try {
-                                ProxyProtocolParser.parseFromSocket(rawSocket);
-                            } catch (Exception e) {
-                                LOG.debug("Failed to parse PROXY on data connection", e);
-                            }
+                            rawSocket = new ProxyAwareSocket(rawSocket);
                         }
 
                         acceptedSocket = rawSocket;
