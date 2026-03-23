@@ -146,6 +146,8 @@ public class PassiveConnectionService {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger nextPortIndex = new AtomicInteger(0);
 
+    private final boolean proxyProtocol;
+
     // Metrics
     private final AtomicLong totalReservations = new AtomicLong(0);
     private final AtomicInteger activeReservations = new AtomicInteger(0);
@@ -154,15 +156,20 @@ public class PassiveConnectionService {
     private final AtomicLong cancelledReservations = new AtomicLong(0);
 
     public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress) {
-        this(ports, bindAddress, 1000);
+        this(ports, bindAddress, 1000, defaultMaxTotalReservations(ports), false);
     }
 
     public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis) {
-        this(ports, bindAddress, acceptTimeoutMillis, defaultMaxTotalReservations(ports));
+        this(ports, bindAddress, acceptTimeoutMillis, defaultMaxTotalReservations(ports), false);
     }
 
     public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis,
             int maxTotalReservations) {
+        this(ports, bindAddress, acceptTimeoutMillis, maxTotalReservations, false);
+    }
+
+    public PassiveConnectionService(Set<Integer> ports, InetAddress bindAddress, int acceptTimeoutMillis,
+            int maxTotalReservations, boolean proxyProtocol) {
         if (ports == null || ports.isEmpty()) {
             throw new IllegalArgumentException("Passive ports are required");
         }
@@ -185,6 +192,7 @@ public class PassiveConnectionService {
         this.maxPerIp = ports.size();
         this.maxTotalReservations = maxTotalReservations;
         this.acceptTimeoutMillis = acceptTimeoutMillis;
+        this.proxyProtocol = proxyProtocol;
 
         // prepare pending maps so register() can be used before start() in tests
         for (int port : ports) {
@@ -382,6 +390,20 @@ public class PassiveConnectionService {
 
     private void handleAccepted(int port, Socket socket) {
         InetAddress remoteAddress = ((InetSocketAddress) socket.getRemoteSocketAddress()).getAddress();
+
+        if (proxyProtocol) {
+            try {
+                ProxyProtocolResult result = ProxyProtocolParser.parseFromSocket(socket);
+                if (result != null && !result.local() && result.sourceAddress() != null) {
+                    remoteAddress = result.sourceAddress().getAddress();
+                    LOG.debug("Data connection PROXY v2: client={} (socket={})", remoteAddress.getHostAddress(),
+                            socket.getInetAddress().getHostAddress());
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to parse PROXY protocol on data connection from {}", remoteAddress.getHostAddress(), e);
+            }
+        }
+
         String key = getCanonicalAddressKey(remoteAddress);
         Reservation reservation;
 
@@ -479,7 +501,7 @@ public class PassiveConnectionService {
         return maxTotalReservations;
     }
 
-    private static int defaultMaxTotalReservations(Set<Integer> ports) {
+    public static int defaultMaxTotalReservations(Set<Integer> ports) {
         if (ports == null || ports.isEmpty()) {
             return 0;
         }
