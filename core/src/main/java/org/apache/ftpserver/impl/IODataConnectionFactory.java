@@ -62,6 +62,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
     long requestTime = 0L;
 
+    /** When the transfer began waiting for the data connection; see {@link #logPassiveAccept()}. */
+    private long acceptStartTime = 0L;
+
     boolean passive = false;
 
     boolean secure = false;
@@ -204,6 +207,9 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 port = passiveReservation.getPort();
                 passive = true;
                 requestTime = System.currentTimeMillis();
+
+                logPassiveGrant("reserved");
+
                 return new InetSocketAddress(address, port);
             }
 
@@ -244,6 +250,8 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             // set different state variables
             passive = true;
             requestTime = System.currentTimeMillis();
+
+            logPassiveGrant("bound");
 
             return new InetSocketAddress(address, port);
         } catch (Exception ex) {
@@ -336,6 +344,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 dataSoc.connect(new InetSocketAddress(address, port));
             } else {
                 Socket acceptedSocket;
+                acceptStartTime = System.currentTimeMillis();
 
                 if (isMultiplexEnabled(session.getListener().getDataConnectionConfiguration())) {
                     if (passiveReservation == null || passiveConnectionService == null) {
@@ -434,6 +443,8 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     dataSoc = acceptedSocket;
                 }
 
+                logPassiveAccept();
+
                 if (dataConfig.isPassiveIpCheck() && !session.getListener().isProxyProtocol()) {
                     // When proxy protocol is active, the socket address doesn't match
                     // the PROXY-provided client address — skip the check.
@@ -454,8 +465,16 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 LOG.debug("Passive data connection opened");
             }
         } catch (Exception ex) {
+            // Capture before closeDataConnection(), which resets port/requestTime/passive.
+            int failedPort = port;
+            boolean wasPassive = passive;
+            long waitedMillis = requestTime > 0 ? System.currentTimeMillis() - requestTime : -1;
+
             closeDataConnection();
-            LOG.warn("FtpDataConnection.getDataSocket()", ex);
+
+            LOG.warn("FtpDataConnection.getDataSocket() failed: session={} user={} passive={} "
+                            + "passivePort={} waitedMs={}",
+                    session.getSessionId(), userName(), wasPassive, failedPort, waitedMillis, ex);
             throw ex;
         }
 
@@ -506,6 +525,92 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      */
     public boolean isZipMode() {
         return isZip;
+    }
+
+    private String userName() {
+        return session != null && session.getUser() != null ? session.getUser().getName() : "<none>";
+    }
+
+    private InetAddress controlAddress() {
+        if (session == null) {
+            return null;
+        }
+        SocketAddress remote = session.getRemoteAddress();
+        return remote instanceof InetSocketAddress ? ((InetSocketAddress) remote).getAddress() : null;
+    }
+
+    /**
+     * Records which passive port was handed to which session, at the moment it is advertised.
+     *
+     * <p>Logged at INFO because passive port assignment cannot be reconstructed after the fact:
+     * the 227 reply is written asynchronously, so the reply seen next to a command in the log is
+     * not necessarily the reply to that command.</p>
+     *
+     * @param how {@code bound} for a dedicated listener, {@code reserved} when multiplexing
+     */
+    private void logPassiveGrant(String how) {
+        InetAddress control = controlAddress();
+        LOG.info("Passive port {}: session={} user={} passivePort={} control={}",
+                how,
+                session != null ? session.getSessionId() : null,
+                userName(),
+                port,
+                control != null ? control.getHostAddress() : "<unknown>");
+    }
+
+    /**
+     * Records a passive data connection at accept time: which passive port it landed on, where it
+     * actually came from, and how long the transfer waited for it.
+     *
+     * <p>The source address and port are the point of this. Without them there is no way to tell a
+     * correctly matched data connection from one opened by a different client that happened to
+     * reach this listener — the blind spot behind the mislabelled uploads investigated in
+     * varanus-pos-ftp#38, where a file's contents did not match its name and nothing in the logs
+     * could say why.</p>
+     */
+    private void logPassiveAccept() {
+        if (dataSoc == null) {
+            return;
+        }
+
+        InetAddress dataAddress = dataSoc.getInetAddress();
+        InetAddress control = controlAddress();
+        long now = System.currentTimeMillis();
+        long sincePasvMillis = requestTime > 0 ? now - requestTime : -1;
+        // Time actually spent blocked in accept(). A value near zero means the connection was
+        // already sitting in the listener's backlog before the transfer command was processed —
+        // i.e. the client connected ahead of the command the server is currently running, which
+        // is what a name/content mismatch would look like from this side.
+        long acceptWaitMillis = acceptStartTime > 0 ? now - acceptStartTime : -1;
+
+        LOG.info("Passive data connection accepted: session={} user={} passivePort={} from={}:{} "
+                        + "control={} sincePasvMs={} acceptWaitMs={}",
+                session != null ? session.getSessionId() : null,
+                userName(),
+                port,
+                dataAddress != null ? dataAddress.getHostAddress() : "<unknown>",
+                dataSoc.getPort(),
+                control != null ? control.getHostAddress() : "<unknown>",
+                sincePasvMillis,
+                acceptWaitMillis);
+
+        // Deliberately independent of passiveIpCheck, which defaults to false and is disabled in
+        // production: with that guard off we would otherwise keep no record at all of a data
+        // connection arriving from somewhere other than the session that asked for it.
+        if (dataAddress != null && control != null && !dataAddress.equals(control)) {
+            boolean checkEnabled = session.getListener().getDataConnectionConfiguration()
+                    .isPassiveIpCheck();
+            LOG.warn("Passive data connection SOURCE MISMATCH: session={} user={} passivePort={} "
+                            + "arrived from {} but this session's control connection is {} "
+                            + "(passiveIpCheck={} - connection {})",
+                    session.getSessionId(),
+                    userName(),
+                    port,
+                    dataAddress.getHostAddress(),
+                    control.getHostAddress(),
+                    checkEnabled,
+                    checkEnabled ? "will be rejected" : "IS BEING USED");
+        }
     }
 
     private boolean isMultiplexEnabled(DataConnectionConfiguration cfg) {
