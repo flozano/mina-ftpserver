@@ -19,6 +19,7 @@
 
 package org.apache.ftpserver.impl;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -236,11 +237,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 // (https://issues.apache.org/jira/browse/FTPSERVER-241).
                 // Instead, it creates a regular
                 // ServerSocket that will be wrapped as a SSL socket in createDataSocket()
-                servSoc = new ServerSocket(passivePort, 0, address);
+                servSoc = createPassiveServerSocket(passivePort);
                 LOG.debug("SSL Passive data connection created on address \"{}\" and port {}", address, passivePort);
             } else {
                 LOG.debug("Opening passive data connection on address \"{}\" and port {}", address, passivePort);
-                servSoc = new ServerSocket(passivePort, 0, address);
+                servSoc = createPassiveServerSocket(passivePort);
                 LOG.debug("Passive data connection created on address \"{}\" and port {}", address, passivePort);
             }
 
@@ -525,6 +526,35 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      */
     public boolean isZipMode() {
         return isZip;
+    }
+
+    /**
+     * Creates the passive listener with {@code SO_REUSEADDR} applied.
+     *
+     * <p>{@code new ServerSocket(port, backlog, address)} binds inside the constructor, so a
+     * {@code setReuseAddress(true)} afterwards arrives too late to have any effect — the option
+     * must be set on an unbound socket. Passive ports come from a small shared pool and are
+     * rebound constantly, so without this a port still in {@code TIME_WAIT} from a previous
+     * transfer fails to bind and the PASV is rejected, even though the port is free as far as the
+     * pool is concerned.</p>
+     *
+     * <p>{@link PassiveConnectionService} already binds this way; this brings the non-multiplexed
+     * path, which is the one in use when {@code ports-multiplex} is false, into line with it.</p>
+     */
+    private ServerSocket createPassiveServerSocket(int passivePort) throws IOException {
+        ServerSocket socket = new ServerSocket();
+        try {
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(address, passivePort), 0);
+            return socket;
+        } catch (IOException | RuntimeException ex) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // nothing useful to do
+            }
+            throw ex;
+        }
     }
 
     private String userName() {
