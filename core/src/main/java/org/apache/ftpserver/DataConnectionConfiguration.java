@@ -20,7 +20,9 @@
 package org.apache.ftpserver;
 
 import java.net.InetAddress;
+import java.util.List;
 
+import org.apache.ftpserver.ftplet.FtpSession;
 import org.apache.ftpserver.ssl.SslConfiguration;
 
 /**
@@ -116,6 +118,33 @@ public interface DataConnectionConfiguration {
      * @return A free passive part
      */
     int requestPassivePort();
+
+    /**
+     * Request a passive port for a specific session, allowing an implementation to take the
+     * session into account when choosing one.
+     * <p>
+     * The default implementation ignores the session and behaves like
+     * {@link #requestPassivePort()}.
+     *
+     * @param session The session the port is requested for
+     * @return A free passive port, or -1 if none could be reserved
+     */
+    default int requestPassivePort(FtpSession session) {
+        return requestPassivePort();
+    }
+
+    /**
+     * Request a passive port, honouring a preference order.
+     * <p>
+     * Candidates are tried in the given order and the first one available is reserved. The
+     * default implementation ignores the order and behaves like {@link #requestPassivePort()}.
+     *
+     * @param preferenceOrder The ports to try, most preferred first
+     * @return A free passive port, or -1 if none could be reserved
+     */
+    default int requestPassivePort(List<Integer> preferenceOrder) {
+        return requestPassivePort();
+    }
 
     /**
      * Release passive port.

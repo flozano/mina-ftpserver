@@ -226,11 +226,53 @@ public class PassivePorts {
     }
 
     /**
-     * Reserve the next port
+     * Reserve the next port, picked at random from the free ports.
      *
      * @return The reserved port
      */
     public synchronized int reserveNextPort() {
+        return reserveNextPort(null);
+    }
+
+    /**
+     * Reserve the next port, honouring a caller-supplied preference order.
+     * <p>
+     * The candidates are tried in the given order and the first one that is free, and not bound
+     * by another process, is reserved. Candidates that are not part of this instance's configured
+     * ports are ignored. When <code>preferenceOrder</code> is <code>null</code> or empty the
+     * behaviour is unchanged: a port is picked at random from all free ports.
+     *
+     * @param preferenceOrder
+     *            The ports to try, most preferred first, or <code>null</code> for no preference
+     * @return The reserved port, or -1 if no candidate could be reserved
+     */
+    public synchronized int reserveNextPort(final List<Integer> preferenceOrder) {
+        if (preferenceOrder != null && !preferenceOrder.isEmpty()) {
+            for (Integer candidate : preferenceOrder) {
+                if (candidate == null || !freeList.contains(candidate)) {
+                    // already reserved, or not one of our ports
+                    continue;
+                }
+
+                if (candidate == 0) {
+                    // "Any" port should not be removed from our free list,
+                    // nor added to the used list
+                    return 0;
+                }
+
+                if (checkPortUnbound(candidate)) {
+                    freeList.remove(candidate);
+                    usedList.add(candidate);
+                    return candidate;
+                }
+
+                // log port unavailable, but left in pool
+                log.warn("Passive port in use by another process: " + candidate);
+            }
+
+            return -1;
+        }
+
         // create a copy of the free ports, so that we can keep track of the tested ports
         List<Integer> freeCopy = new ArrayList<>(freeList);
 
