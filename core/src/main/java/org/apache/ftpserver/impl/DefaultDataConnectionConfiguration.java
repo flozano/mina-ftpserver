@@ -227,6 +227,16 @@ public class DefaultDataConnectionConfiguration implements
     }
 
     /**
+     * Get a passive data port, honouring the given preference order.
+     *
+     * {@inheritDoc}
+     */
+    @Override
+    public synchronized int requestPassivePort(final java.util.List<Integer> preferenceOrder) {
+        return passivePorts.reserveNextPort(preferenceOrder);
+    }
+
+    /**
      * Retrive the passive ports configured for this data connection
      *
      * @return The String of passive ports

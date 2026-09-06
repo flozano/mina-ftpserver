@@ -215,7 +215,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             }
 
             // get the passive port
-            int passivePort = dataCfg.requestPassivePort();
+            int passivePort = dataCfg.requestPassivePort(session.getFtpletSession());
 
             if (passivePort == -1) {
                 servSoc = null;
