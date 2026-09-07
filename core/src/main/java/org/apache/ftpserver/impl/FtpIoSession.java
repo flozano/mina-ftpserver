@@ -319,6 +319,20 @@ public class FtpIoSession implements IoSession {
     }
 
     /**
+     * The address this session's socket is actually bound to on this host, ignoring anything
+     * supplied by PROXY protocol.
+     * <p>
+     * {@link #getLocalAddress()} reports the destination the client connected to, which behind a
+     * proxy belongs to the proxy rather than to us. That is the right address to report back to a
+     * client, but it cannot be bound here, so anything opening a local socket must use this one.
+     *
+     * @return the real local socket address
+     */
+    public SocketAddress getRealLocalAddress() {
+        return wrappedSession.getLocalAddress();
+    }
+
+    /**
      * {@inheritDoc}
      */
     public long getReadBytes() {
