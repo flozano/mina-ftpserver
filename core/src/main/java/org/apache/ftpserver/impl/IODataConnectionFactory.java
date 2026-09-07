@@ -195,6 +195,13 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 address = resolveAddress(dataCfg.getPassiveAddress());
             }
 
+            // `address` is what we report to the client. The address we bind must additionally be
+            // one this host owns, and those differ behind a proxy: with PROXY protocol,
+            // serverControlAddress is the destination the client connected to at the proxy, so
+            // binding to it fails with "Cannot assign requested address" and every PASV answers
+            // 425. Without a proxy the two are the same and nothing changes.
+            InetAddress bindAddress = passiveAddress == null ? localBindAddress() : address;
+
             if (isMultiplexEnabled(dataCfg)) {
                 Listener listener = session.getListener();
                 PassiveConnectionService service = listener.getPassiveConnectionService();
@@ -237,11 +244,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 // (https://issues.apache.org/jira/browse/FTPSERVER-241).
                 // Instead, it creates a regular
                 // ServerSocket that will be wrapped as a SSL socket in createDataSocket()
-                servSoc = createPassiveServerSocket(passivePort);
+                servSoc = createPassiveServerSocket(passivePort, bindAddress);
                 LOG.debug("SSL Passive data connection created on address \"{}\" and port {}", address, passivePort);
             } else {
                 LOG.debug("Opening passive data connection on address \"{}\" and port {}", address, passivePort);
-                servSoc = createPassiveServerSocket(passivePort);
+                servSoc = createPassiveServerSocket(passivePort, bindAddress);
                 LOG.debug("Passive data connection created on address \"{}\" and port {}", address, passivePort);
             }
 
@@ -494,6 +501,18 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
     /*
      * (non-Javadoc) Returns an InetAddress object from a hostname or IP address.
      */
+    /**
+     * The local address passive sockets should bind to: the session's real socket address, never a
+     * PROXY-supplied one. Falls back to the reported address when unavailable.
+     */
+    private InetAddress localBindAddress() {
+        if (session != null && session.getRealLocalAddress() instanceof InetSocketAddress local
+                && local.getAddress() != null) {
+            return local.getAddress();
+        }
+        return address;
+    }
+
     private InetAddress resolveAddress(String host) throws DataConnectionException {
         if (host == null) {
             return null;
@@ -541,11 +560,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      * <p>{@link PassiveConnectionService} already binds this way; this brings the non-multiplexed
      * path, which is the one in use when {@code ports-multiplex} is false, into line with it.</p>
      */
-    private ServerSocket createPassiveServerSocket(int passivePort) throws IOException {
+    private ServerSocket createPassiveServerSocket(int passivePort, InetAddress bindAddress) throws IOException {
         ServerSocket socket = new ServerSocket();
         try {
             socket.setReuseAddress(true);
-            socket.bind(new InetSocketAddress(address, passivePort), 0);
+            socket.bind(new InetSocketAddress(bindAddress, passivePort), 0);
             return socket;
         } catch (IOException | RuntimeException ex) {
             try {
