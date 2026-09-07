@@ -227,13 +227,13 @@ public class DefaultDataConnectionConfiguration implements
     }
 
     /**
-     * Get a passive data port, honouring the given preference order.
+     * Get a passive data port from the given allow-list, or -1 when none of them is free.
      *
      * {@inheritDoc}
      */
     @Override
-    public synchronized int requestPassivePort(final java.util.List<Integer> preferenceOrder) {
-        return passivePorts.reserveNextPort(preferenceOrder);
+    public synchronized int requestPassivePort(final java.util.List<Integer> allowedPorts) {
+        return passivePorts.reserveNextPort(allowedPorts);
     }
 
     /**
