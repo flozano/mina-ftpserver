@@ -627,7 +627,12 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
         // Deliberately independent of passiveIpCheck, which defaults to false and is disabled in
         // production: with that guard off we would otherwise keep no record at all of a data
         // connection arriving from somewhere other than the session that asked for it.
-        if (dataAddress != null && control != null && !dataAddress.equals(control)) {
+        // Use the same comparison the check itself uses, so this warning predicts exactly what
+        // enabling passiveIpCheck would reject. A plain equals() would report IPv4-mapped IPv6 and
+        // IPv4 forms of one address as a mismatch, which the check tolerates — over-reporting that
+        // would make this log misleading precisely when it is being used to decide whether the
+        // check is safe to turn on.
+        if (dataAddress != null && control != null && !isSameAddressForPassiveIpCheck(control, dataAddress)) {
             boolean checkEnabled = session.getListener().getDataConnectionConfiguration()
                     .isPassiveIpCheck();
             LOG.warn("Passive data connection SOURCE MISMATCH: session={} user={} passivePort={} "
