@@ -231,48 +231,6 @@ public class PassivePorts {
      * @return The reserved port
      */
     public synchronized int reserveNextPort() {
-        return reserveNextPort(null);
-    }
-
-    /**
-     * Reserve the next port, honouring a caller-supplied preference order.
-     * <p>
-     * The candidates are tried in the given order and the first one that is free, and not bound
-     * by another process, is reserved. Candidates that are not part of this instance's configured
-     * ports are ignored. When <code>preferenceOrder</code> is <code>null</code> or empty the
-     * behaviour is unchanged: a port is picked at random from all free ports.
-     *
-     * @param preferenceOrder
-     *            The ports to try, most preferred first, or <code>null</code> for no preference
-     * @return The reserved port, or -1 if no candidate could be reserved
-     */
-    public synchronized int reserveNextPort(final List<Integer> preferenceOrder) {
-        if (preferenceOrder != null && !preferenceOrder.isEmpty()) {
-            for (Integer candidate : preferenceOrder) {
-                if (candidate == null || !freeList.contains(candidate)) {
-                    // already reserved, or not one of our ports
-                    continue;
-                }
-
-                if (candidate == 0) {
-                    // "Any" port should not be removed from our free list,
-                    // nor added to the used list
-                    return 0;
-                }
-
-                if (checkPortUnbound(candidate)) {
-                    freeList.remove(candidate);
-                    usedList.add(candidate);
-                    return candidate;
-                }
-
-                // log port unavailable, but left in pool
-                log.warn("Passive port in use by another process: " + candidate);
-            }
-
-            return -1;
-        }
-
         // create a copy of the free ports, so that we can keep track of the tested ports
         List<Integer> freeCopy = new ArrayList<>(freeList);
 
@@ -298,6 +256,57 @@ public class PassivePorts {
                 // log port unavailable, but left in pool
                 log.warn("Passive port in use by another process: " + ret);
             }
+        }
+
+        return -1;
+    }
+
+    /**
+     * Reserve a port from a caller-supplied allow-list.
+     * <p>
+     * This is a restriction, not a hint. Only a port present in <code>allowedPorts</code> can be
+     * reserved; when every one of them is unavailable this returns -1 rather than falling back to
+     * the rest of the pool. Callers restricting a session to a subset therefore get a failure they
+     * can report, never a port outside the subset.
+     * <p>
+     * The entries are tried in the order given, so a caller may also express a preference within
+     * what it allows. Entries that are not among this instance's configured ports are ignored.
+     * <p>
+     * There is deliberately no value meaning "any port". Callers that intend no restriction use
+     * {@link #reserveNextPort()} instead; nothing should pass an empty list, and nothing should
+     * pass <code>null</code>. Both are tolerated rather than thrown, and both allow nothing, so a
+     * caller whose allow-list computation goes wrong gets a visible failure instead of the run of
+     * the whole pool.
+     *
+     * @param allowedPorts
+     *            The only ports that may be reserved, most preferred first. Required.
+     * @return The reserved port, or -1 if none of the allowed ports could be reserved
+     */
+    public synchronized int reserveNextPort(final List<Integer> allowedPorts) {
+        if (allowedPorts == null || allowedPorts.isEmpty()) {
+            return -1;
+        }
+
+        for (Integer candidate : allowedPorts) {
+            if (candidate == null || !freeList.contains(candidate)) {
+                // already reserved, or not one of our ports
+                continue;
+            }
+
+            if (candidate == 0) {
+                // "Any" port should not be removed from our free list,
+                // nor added to the used list
+                return 0;
+            }
+
+            if (checkPortUnbound(candidate)) {
+                freeList.remove(candidate);
+                usedList.add(candidate);
+                return candidate;
+            }
+
+            // log port unavailable, but left in pool
+            log.warn("Passive port in use by another process: " + candidate);
         }
 
         return -1;

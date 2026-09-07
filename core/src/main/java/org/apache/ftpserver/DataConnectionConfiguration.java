@@ -134,15 +134,20 @@ public interface DataConnectionConfiguration {
     }
 
     /**
-     * Request a passive port, honouring a preference order.
+     * Request a passive port restricted to a caller-supplied allow-list.
      * <p>
-     * Candidates are tried in the given order and the first one available is reserved. The
-     * default implementation ignores the order and behaves like {@link #requestPassivePort()}.
+     * Implementations that honour this must reserve only a port present in
+     * <code>allowedPorts</code>, and return -1 when none of them is available rather than falling
+     * back to the rest of the pool. Entries are tried in the order given. Callers that intend no
+     * restriction use {@link #requestPassivePort()}; this form is not the place to express that.
+     * <p>
+     * The default implementation ignores the restriction and behaves like
+     * {@link #requestPassivePort()}.
      *
-     * @param preferenceOrder The ports to try, most preferred first
-     * @return A free passive port, or -1 if none could be reserved
+     * @param allowedPorts The only ports that may be reserved, most preferred first
+     * @return A free passive port, or -1 if none of the allowed ports could be reserved
      */
-    default int requestPassivePort(List<Integer> preferenceOrder) {
+    default int requestPassivePort(List<Integer> allowedPorts) {
         return requestPassivePort();
     }
 
