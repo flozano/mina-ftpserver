@@ -20,7 +20,9 @@
 package org.apache.ftpserver;
 
 import java.net.InetAddress;
+import java.util.List;
 
+import org.apache.ftpserver.ftplet.FtpSession;
 import org.apache.ftpserver.ssl.SslConfiguration;
 
 /**
@@ -93,6 +95,13 @@ public interface DataConnectionConfiguration {
     String getPassivePorts();
 
     /**
+     * Returns the parsed passive port numbers.
+     *
+     * @return The set of passive port numbers
+     */
+    java.util.Set<Integer> getPassivePortSet();
+
+    /**
      * Tells whether or not IP address check is performed when accepting a
      * passive data connection.
      *
@@ -109,6 +118,56 @@ public interface DataConnectionConfiguration {
      * @return A free passive part
      */
     int requestPassivePort();
+
+    /**
+     * Request a passive port for a specific session, allowing an implementation to take the
+     * session into account when choosing one.
+     * <p>
+     * The default implementation ignores the session and behaves like
+     * {@link #requestPassivePort()}.
+     *
+     * @param session The session the port is requested for
+     * @return A free passive port, or -1 if none could be reserved
+     */
+    default int requestPassivePort(FtpSession session) {
+        return requestPassivePort();
+    }
+
+    /**
+     * Request a passive port restricted to a caller-supplied allow-list.
+     * <p>
+     * Implementations that honour this must reserve only a port present in
+     * <code>allowedPorts</code>, and return -1 when none of them is available rather than falling
+     * back to the rest of the pool. Entries are tried in the order given. Callers that intend no
+     * restriction use {@link #requestPassivePort()}; this form is not the place to express that.
+     * <p>
+     * The default implementation ignores the restriction and behaves like
+     * {@link #requestPassivePort()}.
+     *
+     * @param allowedPorts The only ports that may be reserved, most preferred first
+     * @return A free passive port, or -1 if none of the allowed ports could be reserved
+     */
+    default int requestPassivePort(List<Integer> allowedPorts) {
+        return requestPassivePort();
+    }
+
+    /**
+     * Request a passive port restricted to a caller-supplied allow-list, waiting up to
+     * <code>timeoutMillis</code> for one to be released if none is free right now.
+     * <p>
+     * A small pool exhausted by a burst otherwise fails every caller that arrives during it, even
+     * though ports are usually held only briefly. Waiting turns that into a short queue. A timeout
+     * of 0 or less does not wait and behaves like {@link #requestPassivePort(List)}.
+     * <p>
+     * The default implementation ignores the timeout and does not wait.
+     *
+     * @param allowedPorts The only ports that may be reserved, most preferred first
+     * @param timeoutMillis How long to wait for a port to be released; 0 or less does not wait
+     * @return A free passive port, or -1 if none became available before the deadline
+     */
+    default int requestPassivePort(List<Integer> allowedPorts, long timeoutMillis) {
+        return requestPassivePort(allowedPorts);
+    }
 
     /**
      * Release passive port.

@@ -52,6 +52,8 @@ public class DataConnectionConfigurationFactory {
     private PassivePorts passivePorts = new PassivePorts(Collections.<Integer>emptySet(), true);
     private boolean passiveIpCheck = false;
     private boolean implicitSsl;
+    private boolean multiplexPassivePorts;
+    private int maxTotalPassiveReservations;
 
     /**
      * Public constructor for DataConnectionConfigurationFactory
@@ -70,7 +72,8 @@ public class DataConnectionConfigurationFactory {
                 ssl, activeEnabled, activeIpCheck,
                 activeLocalAddress, activeLocalPort,
                 passiveAddress, passivePorts,
-                passiveExternalAddress, passiveIpCheck, implicitSsl);
+                passiveExternalAddress, passiveIpCheck, implicitSsl, multiplexPassivePorts,
+                maxTotalPassiveReservations);
     }
     /*
      * (Non-Javadoc)
@@ -267,6 +270,10 @@ public class DataConnectionConfigurationFactory {
         return passivePorts.toString();
     }
 
+    public java.util.Set<Integer> getPassivePortSet() {
+        return passivePorts.getPorts();
+    }
+
     /**
      * Set the passive ports to be used for data connections. Ports can be
      * defined as single ports, closed or open ranges. Multiple definitions can
@@ -328,5 +335,46 @@ public class DataConnectionConfigurationFactory {
      */
     public void setImplicitSsl(boolean implicitSsl) {
         this.implicitSsl = implicitSsl;
+    }
+
+    /**
+     * Tells if passive ports can be reused concurrently per client IP.
+     *
+     * @return true if multiplexing is enabled
+     */
+    public boolean isMultiplexPassivePorts() {
+        return multiplexPassivePorts;
+    }
+
+    /**
+     * Enable passive port multiplexing per client IP.
+     *
+     * @param multiplexPassivePorts true to enable multiplexing
+     */
+    public void setMultiplexPassivePorts(boolean multiplexPassivePorts) {
+        this.multiplexPassivePorts = multiplexPassivePorts;
+    }
+
+    /**
+     * Returns the global cap for multiplexed passive reservations.
+     * A value of 0 means "use internal default".
+     *
+     * @return maximum total passive reservations across all client IPs
+     */
+    public int getMaxTotalPassiveReservations() {
+        return maxTotalPassiveReservations;
+    }
+
+    /**
+     * Sets the global cap for multiplexed passive reservations.
+     * A value of 0 means "use internal default".
+     *
+     * @param maxTotalPassiveReservations maximum total passive reservations
+     */
+    public void setMaxTotalPassiveReservations(int maxTotalPassiveReservations) {
+        if (maxTotalPassiveReservations < 0) {
+            throw new IllegalArgumentException("Maximum total passive reservations cannot be negative");
+        }
+        this.maxTotalPassiveReservations = maxTotalPassiveReservations;
     }
 }

@@ -48,6 +48,8 @@ public class DefaultDataConnectionConfiguration implements
     private final boolean passiveIpCheck;
 
     private final boolean implicitSsl;
+    private final boolean multiplexPassivePorts;
+    private final int maxTotalPassiveReservations;
 
     /**
      * Internal constructor, do not use directly. Use
@@ -64,13 +66,16 @@ public class DefaultDataConnectionConfiguration implements
      * @param passiveExternalAddress The passive external address
      * @param passiveIpCheck The passive IP check
      * @param implicitSsl Implicit SSL
+     * @param multiplexPassivePorts Enable passive port multiplexing per client IP
+     * @param maxTotalPassiveReservations Global cap for multiplexed passive reservations
      *
      */
     public DefaultDataConnectionConfiguration(int idleTime,
         SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
         String activeLocalAddress, int activeLocalPort, String passiveAddress,
         PassivePorts passivePorts, String passiveExternalAddress,
-        boolean passiveIpCheck, boolean implicitSsl) {
+        boolean passiveIpCheck, boolean implicitSsl, boolean multiplexPassivePorts,
+        int maxTotalPassiveReservations) {
         this.idleTime = idleTime;
         this.ssl = ssl;
         this.activeEnabled = activeEnabled;
@@ -82,6 +87,66 @@ public class DefaultDataConnectionConfiguration implements
         this.passiveExternalAddress = passiveExternalAddress;
         this.passiveIpCheck = passiveIpCheck;
         this.implicitSsl = implicitSsl;
+        this.multiplexPassivePorts = multiplexPassivePorts;
+        this.maxTotalPassiveReservations = maxTotalPassiveReservations;
+    }
+
+    /**
+     * Backward-compatible constructor without global reservation cap.
+     *
+     * @param idleTime The idle time
+     * @param ssl he SSL Configuration
+     * @param activeEnabled Is active mode enabled?
+     * @param activeIpCheck The activa IP check
+     * @param activeLocalAddress The active local address
+     * @param activeLocalPort The active local port
+     * @param passiveAddress The passive address
+     * @param passivePorts The passive ports
+     * @param passiveExternalAddress The passive external address
+     * @param passiveIpCheck The passive IP check
+     * @param implicitSsl Implicit SSL
+     * @param multiplexPassivePorts Enable passive port multiplexing per client IP
+     * @deprecated use
+     * {@link #DefaultDataConnectionConfiguration(int, SslConfiguration, boolean, boolean,
+     * String, int, String, PassivePorts, String, boolean, boolean, boolean, int)}
+     */
+    @Deprecated
+    public DefaultDataConnectionConfiguration(int idleTime,
+        SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
+        String activeLocalAddress, int activeLocalPort, String passiveAddress,
+        PassivePorts passivePorts, String passiveExternalAddress,
+        boolean passiveIpCheck, boolean implicitSsl, boolean multiplexPassivePorts) {
+        this(idleTime, ssl, activeEnabled, activeIpCheck, activeLocalAddress, activeLocalPort,
+            passiveAddress, passivePorts, passiveExternalAddress, passiveIpCheck,
+            implicitSsl, multiplexPassivePorts, 0);
+    }
+
+    /**
+     * Backward-compatible constructor without multiplex flag.
+     *
+     * @param idleTime The idle time
+     * @param ssl SSL configuration
+     * @param activeEnabled active mode enabled flag
+     * @param activeIpCheck active IP check flag
+     * @param activeLocalAddress active local address
+     * @param activeLocalPort active local port
+     * @param passiveAddress passive address
+     * @param passivePorts passive ports
+     * @param passiveExternalAddress passive external address
+     * @param passiveIpCheck passive IP check flag
+     * @param implicitSsl implicit SSL flag
+     * @deprecated use
+     * {@link #DefaultDataConnectionConfiguration(int, SslConfiguration, boolean, boolean,
+     * String, int, String, PassivePorts, String, boolean, boolean, boolean, int)}
+     */
+    @Deprecated
+    public DefaultDataConnectionConfiguration(int idleTime,
+        SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
+        String activeLocalAddress, int activeLocalPort, String passiveAddress,
+        PassivePorts passivePorts, String passiveExternalAddress,
+        boolean passiveIpCheck, boolean implicitSsl) {
+        this(idleTime, ssl, activeEnabled, activeIpCheck, activeLocalAddress, activeLocalPort,
+            passiveAddress, passivePorts, passiveExternalAddress, passiveIpCheck, implicitSsl, false);
     }
 
     /**
@@ -162,12 +227,43 @@ public class DefaultDataConnectionConfiguration implements
     }
 
     /**
+     * Get a passive data port from the given allow-list, or -1 when none of them is free.
+     *
+     * {@inheritDoc}
+     */
+    @Override
+    public synchronized int requestPassivePort(final java.util.List<Integer> allowedPorts) {
+        return passivePorts.reserveNextPort(allowedPorts);
+    }
+
+    /**
+     * Get a passive data port from the given allow-list, waiting up to <code>timeoutMillis</code>
+     * for one to be released, or -1 when none becomes free in time.
+     * <p>
+     * <strong>Deliberately not <code>synchronized</code>.</strong> Waiting happens inside
+     * {@link PassivePorts}, which does its own locking, and releasing goes through
+     * {@link #releasePassivePort(int)} on <em>this</em> monitor. Holding this monitor while waiting
+     * would lock out every release and guarantee that no port could ever come back, turning the
+     * wait into a deadlock that only ends at the timeout.
+     *
+     * {@inheritDoc}
+     */
+    @Override
+    public int requestPassivePort(final java.util.List<Integer> allowedPorts, final long timeoutMillis) {
+        return passivePorts.reserveNextPort(allowedPorts, timeoutMillis);
+    }
+
+    /**
      * Retrive the passive ports configured for this data connection
      *
      * @return The String of passive ports
      */
     public String getPassivePorts() {
         return passivePorts.toString();
+    }
+
+    public java.util.Set<Integer> getPassivePortSet() {
+        return passivePorts.getPorts();
     }
 
     /**
@@ -193,5 +289,13 @@ public class DefaultDataConnectionConfiguration implements
      */
     public boolean isImplicitSsl() {
         return implicitSsl;
+    }
+
+    public boolean isMultiplexPassivePorts() {
+        return multiplexPassivePorts;
+    }
+
+    public int getMaxTotalPassiveReservations() {
+        return maxTotalPassiveReservations;
     }
 }

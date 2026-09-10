@@ -58,6 +58,10 @@ public abstract class AbstractListener implements Listener {
 
     private final DataConnectionConfiguration dataConnectionConfig;
 
+    private final boolean proxyProtocol;
+
+    private org.apache.ftpserver.impl.PassiveConnectionService passiveConnectionService;
+
     /**
      * @deprecated Use the constructor with IpFilter instead.
      * Constructor for internal use, do not use directly. Instead use {@link ListenerFactory}
@@ -84,6 +88,7 @@ public abstract class AbstractListener implements Listener {
         this.sessionFilter = createBlackListFilter(blockedAddresses, blockedSubnets);
         this.blockedAddresses = blockedAddresses;
         this.blockedSubnets = blockedSubnets;
+        this.proxyProtocol = false;
     }
 
     /**
@@ -100,7 +105,7 @@ public abstract class AbstractListener implements Listener {
     public AbstractListener(String serverAddress, int port,
             boolean implicitSsl, SslConfiguration sslConfiguration,
             DataConnectionConfiguration dataConnectionConfig, int idleTimeout,
-            SessionFilter sessionFilter) {
+            SessionFilter sessionFilter, boolean proxyProtocol) {
         this.serverAddress = serverAddress;
         this.port = port;
         this.implicitSsl = implicitSsl;
@@ -110,6 +115,7 @@ public abstract class AbstractListener implements Listener {
         this.sessionFilter = sessionFilter;
         this.blockedAddresses = null;
         this.blockedSubnets = null;
+        this.proxyProtocol = proxyProtocol;
     }
 
     /**
@@ -185,6 +191,15 @@ public abstract class AbstractListener implements Listener {
         return dataConnectionConfig;
     }
 
+    public org.apache.ftpserver.impl.PassiveConnectionService getPassiveConnectionService() {
+        return passiveConnectionService;
+    }
+
+    protected void setPassiveConnectionService(
+            org.apache.ftpserver.impl.PassiveConnectionService passiveConnectionService) {
+        this.passiveConnectionService = passiveConnectionService;
+    }
+
     /**
      * Get the number of seconds during which no network activity
      * is allowed before a session is closed due to inactivity.
@@ -215,5 +230,9 @@ public abstract class AbstractListener implements Listener {
 
     public SessionFilter getSessionFilter() {
         return sessionFilter;
+    }
+
+    public boolean isProxyProtocol() {
+        return proxyProtocol;
     }
 }

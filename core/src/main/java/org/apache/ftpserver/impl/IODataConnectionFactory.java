@@ -19,6 +19,7 @@
 
 package org.apache.ftpserver.impl;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -33,6 +34,7 @@ import org.apache.ftpserver.DataConnectionConfiguration;
 import org.apache.ftpserver.DataConnectionException;
 import org.apache.ftpserver.ftplet.DataConnection;
 import org.apache.ftpserver.ftplet.FtpException;
+import org.apache.ftpserver.listener.Listener;
 import org.apache.ftpserver.ssl.ClientAuth;
 import org.apache.ftpserver.ssl.SslConfiguration;
 import org.slf4j.Logger;
@@ -61,11 +63,17 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
     long requestTime = 0L;
 
+    /** When the transfer began waiting for the data connection; see {@link #logPassiveAccept()}. */
+    private long acceptStartTime = 0L;
+
     boolean passive = false;
 
     boolean secure = false;
 
     private boolean isZip = false;
+
+    private PassiveConnectionService.Reservation passiveReservation;
+    private PassiveConnectionService passiveConnectionService;
 
     InetAddress serverControlAddress;
 
@@ -102,6 +110,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             dataSoc = null;
         }
 
+        DataConnectionConfiguration dcc = null;
+        if (session != null && session.getListener() != null) {
+            dcc = session.getListener().getDataConnectionConfiguration();
+        }
+
         // close server socket if any
         if (servSoc != null) {
             try {
@@ -109,17 +122,24 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             } catch (Exception ex) {
                 LOG.warn("FtpDataConnection.closeDataSocket()", ex);
             }
-
-            if (session != null) {
-                DataConnectionConfiguration dcc = session.getListener().getDataConnectionConfiguration();
-
-                if (dcc != null) {
-                    dcc.releasePassivePort(port);
-                }
-            }
-
             servSoc = null;
         }
+
+        // Always clean pending passive reservation/port even if no server socket is present.
+        if (dcc != null && passive) {
+            if (isMultiplexEnabled(dcc)) {
+                if (passiveConnectionService != null && passiveReservation != null) {
+                    passiveConnectionService.cancel(passiveReservation);
+                }
+            } else if (port > 0) {
+                dcc.releasePassivePort(port);
+            }
+        }
+
+        passiveReservation = null;
+        passiveConnectionService = null;
+        passive = false;
+        port = 0;
 
         // reset request time
         requestTime = 0L;
@@ -164,15 +184,6 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
         // close old sockets if any
         closeDataConnection();
 
-        // get the passive port
-        int passivePort = session.getListener().getDataConnectionConfiguration().requestPassivePort();
-
-        if (passivePort == -1) {
-            servSoc = null;
-            throw new DataConnectionException("Cannot find an available passive port.");
-        }
-
-        // open passive server socket and get parameters
         try {
             DataConnectionConfiguration dataCfg = session.getListener().getDataConnectionConfiguration();
 
@@ -184,6 +195,43 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 address = resolveAddress(dataCfg.getPassiveAddress());
             }
 
+            // `address` is what we report to the client. The address we bind must additionally be
+            // one this host owns, and those differ behind a proxy: with PROXY protocol,
+            // serverControlAddress is the destination the client connected to at the proxy, so
+            // binding to it fails with "Cannot assign requested address" and every PASV answers
+            // 425. Without a proxy the two are the same and nothing changes.
+            InetAddress bindAddress = passiveAddress == null ? localBindAddress() : address;
+
+            if (isMultiplexEnabled(dataCfg)) {
+                Listener listener = session.getListener();
+                PassiveConnectionService service = listener.getPassiveConnectionService();
+                if (service == null) {
+                    throw new DataConnectionException(
+                            "Passive port multiplexing is enabled but no service is available");
+                }
+                passiveConnectionService = service;
+                InetAddress clientAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
+                passiveReservation = passiveConnectionService.register(clientAddress);
+                port = passiveReservation.getPort();
+                passive = true;
+                requestTime = System.currentTimeMillis();
+
+                logPassiveGrant("reserved");
+
+                return new InetSocketAddress(address, port);
+            }
+
+            // get the passive port
+            int passivePort = dataCfg.requestPassivePort(session.getFtpletSession());
+
+            if (passivePort == -1) {
+                servSoc = null;
+                port = 0;
+                throw new DataConnectionException("Cannot find an available passive port.");
+            }
+            port = passivePort;
+
+            // open passive server socket and get parameters
             if (secure) {
                 LOG.debug("Opening SSL passive data connection on address \"{}\" and port {}", address, passivePort);
                 SslConfiguration ssl = getSslConfiguration();
@@ -196,11 +244,11 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 // (https://issues.apache.org/jira/browse/FTPSERVER-241).
                 // Instead, it creates a regular
                 // ServerSocket that will be wrapped as a SSL socket in createDataSocket()
-                servSoc = new ServerSocket(passivePort, 0, address);
+                servSoc = createPassiveServerSocket(passivePort, bindAddress);
                 LOG.debug("SSL Passive data connection created on address \"{}\" and port {}", address, passivePort);
             } else {
                 LOG.debug("Opening passive data connection on address \"{}\" and port {}", address, passivePort);
-                servSoc = new ServerSocket(passivePort, 0, address);
+                servSoc = createPassiveServerSocket(passivePort, bindAddress);
                 LOG.debug("Passive data connection created on address \"{}\" and port {}", address, passivePort);
             }
 
@@ -210,6 +258,8 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             // set different state variables
             passive = true;
             requestTime = System.currentTimeMillis();
+
+            logPassiveGrant("bound");
 
             return new InetSocketAddress(address, port);
         } catch (Exception ex) {
@@ -301,28 +351,87 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                 dataSoc.connect(new InetSocketAddress(address, port));
             } else {
-                if (secure) {
-                    LOG.debug("Opening secure passive data connection");
-                    // this is where we wrap the unsecured socket as a SSLSocket. This is
-                    // due to the JVM bug described in FTPSERVER-241.
+                Socket acceptedSocket;
+                acceptStartTime = System.currentTimeMillis();
 
-                    // get server socket factory
+                if (isMultiplexEnabled(session.getListener().getDataConnectionConfiguration())) {
+                    if (passiveReservation == null || passiveConnectionService == null) {
+                        throw new FtpException("Passive port reservation missing");
+                    }
+                    int timeout = dataConfig.getIdleTime() * 1000;
+                    acceptedSocket = passiveReservation.await(timeout);
+                    if (acceptedSocket == null) {
+                        throw new FtpException("Passive data connection timed out");
+                    }
+                } else {
+                    if (secure) {
+                        LOG.debug("Opening secure passive data connection");
+                        // keep wrapping immediately after accept due to JVM bug (FTPSERVER-241)
+                        SslConfiguration ssl = getSslConfiguration();
+
+                        if (ssl == null) {
+                            throw new FtpException("Data connection SSL not configured");
+                        }
+
+                        SSLSocketFactory ssocketFactory = ssl.getSocketFactory();
+
+                        Socket serverSocket = servSoc.accept();
+
+                        // Best-effort PROXY header detection before TLS wrapping
+                        if (session.getListener().isProxyProtocol()) {
+                            serverSocket = new ProxyAwareSocket(serverSocket);
+                        }
+
+                        SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
+                            serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
+                        sslSocket.setUseClientMode(false);
+
+                        if (ssl.getClientAuth() == ClientAuth.NEED) {
+                            sslSocket.setNeedClientAuth(true);
+                        } else if (ssl.getClientAuth() == ClientAuth.WANT) {
+                            sslSocket.setWantClientAuth(true);
+                        }
+
+                        if (ssl.getEnabledCipherSuites() != null) {
+                            sslSocket.setEnabledCipherSuites(ssl.getEnabledCipherSuites());
+                        }
+
+                        if (ssl.getEnabledProtocols() != null) {
+                            sslSocket.setEnabledProtocols(ssl.getEnabledProtocols());
+                        }
+
+                        dataSoc = sslSocket;
+                        acceptedSocket = dataSoc;
+                    } else {
+                        LOG.debug("Opening passive data connection");
+                        Socket rawSocket = servSoc.accept();
+
+                        // Best-effort PROXY header detection
+                        if (session.getListener().isProxyProtocol()) {
+                            rawSocket = new ProxyAwareSocket(rawSocket);
+                        }
+
+                        acceptedSocket = rawSocket;
+                    }
+                }
+
+                if (secure && !isMultiplexEnabled(session.getListener().getDataConnectionConfiguration())) {
+                    // non-multiplex secure path already wrapped above
+                } else if (secure) {
+                    // Wrap the accepted socket for TLS even when multiplexing is enabled.
                     SslConfiguration ssl = getSslConfiguration();
 
-                    // we've already checked this, but let's do it again
                     if (ssl == null) {
                         throw new FtpException("Data connection SSL not configured");
                     }
 
                     SSLSocketFactory ssocketFactory = ssl.getSocketFactory();
-
-                    Socket serverSocket = servSoc.accept();
-
-                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(serverSocket,
-                        serverSocket.getInetAddress().getHostAddress(), serverSocket.getPort(), true);
+                    SSLSocket sslSocket = (SSLSocket) ssocketFactory.createSocket(
+                            acceptedSocket,
+                            acceptedSocket.getInetAddress().getHostAddress(),
+                            acceptedSocket.getPort(), true);
                     sslSocket.setUseClientMode(false);
 
-                    // initialize server socket
                     if (ssl.getClientAuth() == ClientAuth.NEED) {
                         sslSocket.setNeedClientAuth(true);
                     } else if (ssl.getClientAuth() == ClientAuth.WANT) {
@@ -339,18 +448,18 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
 
                     dataSoc = sslSocket;
                 } else {
-                    LOG.debug("Opening passive data connection");
-
-                    dataSoc = servSoc.accept();
+                    dataSoc = acceptedSocket;
                 }
 
-                if (dataConfig.isPassiveIpCheck()) {
-                    // Let's make sure we got the connection from the same
-                    // client that we are expecting
+                logPassiveAccept();
+
+                if (dataConfig.isPassiveIpCheck() && !session.getListener().isProxyProtocol()) {
+                    // When proxy protocol is active, the socket address doesn't match
+                    // the PROXY-provided client address — skip the check.
                     InetAddress remoteAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
                     InetAddress dataSocketAddress = dataSoc.getInetAddress();
 
-                    if (!dataSocketAddress.equals(remoteAddress)) {
+                    if (!isSameAddressForPassiveIpCheck(remoteAddress, dataSocketAddress)) {
                         LOG.warn("Passive IP Check failed. Closing data connection from " + dataSocketAddress +
                             " as it does not match the expected address " + remoteAddress);
                         closeDataConnection();
@@ -364,8 +473,16 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                 LOG.debug("Passive data connection opened");
             }
         } catch (Exception ex) {
+            // Capture before closeDataConnection(), which resets port/requestTime/passive.
+            int failedPort = port;
+            boolean wasPassive = passive;
+            long waitedMillis = requestTime > 0 ? System.currentTimeMillis() - requestTime : -1;
+
             closeDataConnection();
-            LOG.warn("FtpDataConnection.getDataSocket()", ex);
+
+            LOG.warn("FtpDataConnection.getDataSocket() failed: session={} user={} passive={} "
+                            + "passivePort={} waitedMs={}",
+                    session.getSessionId(), userName(), wasPassive, failedPort, waitedMillis, ex);
             throw ex;
         }
 
@@ -384,6 +501,18 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
     /*
      * (non-Javadoc) Returns an InetAddress object from a hostname or IP address.
      */
+    /**
+     * The local address passive sockets should bind to: the session's real socket address, never a
+     * PROXY-supplied one. Falls back to the reported address when unavailable.
+     */
+    private InetAddress localBindAddress() {
+        if (session != null && session.getRealLocalAddress() instanceof InetSocketAddress local
+                && local.getAddress() != null) {
+            return local.getAddress();
+        }
+        return address;
+    }
+
     private InetAddress resolveAddress(String host) throws DataConnectionException {
         if (host == null) {
             return null;
@@ -416,6 +545,169 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      */
     public boolean isZipMode() {
         return isZip;
+    }
+
+    /**
+     * Creates the passive listener with {@code SO_REUSEADDR} applied.
+     *
+     * <p>{@code new ServerSocket(port, backlog, address)} binds inside the constructor, so a
+     * {@code setReuseAddress(true)} afterwards arrives too late to have any effect — the option
+     * must be set on an unbound socket. Passive ports come from a small shared pool and are
+     * rebound constantly, so without this a port still in {@code TIME_WAIT} from a previous
+     * transfer fails to bind and the PASV is rejected, even though the port is free as far as the
+     * pool is concerned.</p>
+     *
+     * <p>{@link PassiveConnectionService} already binds this way; this brings the non-multiplexed
+     * path, which is the one in use when {@code ports-multiplex} is false, into line with it.</p>
+     */
+    private ServerSocket createPassiveServerSocket(int passivePort, InetAddress bindAddress) throws IOException {
+        ServerSocket socket = new ServerSocket();
+        try {
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(bindAddress, passivePort), 0);
+            return socket;
+        } catch (IOException | RuntimeException ex) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // nothing useful to do
+            }
+            throw ex;
+        }
+    }
+
+    private String userName() {
+        return session != null && session.getUser() != null ? session.getUser().getName() : "<none>";
+    }
+
+    private InetAddress controlAddress() {
+        if (session == null) {
+            return null;
+        }
+        SocketAddress remote = session.getRemoteAddress();
+        return remote instanceof InetSocketAddress ? ((InetSocketAddress) remote).getAddress() : null;
+    }
+
+    /**
+     * Records which passive port was handed to which session, at the moment it is advertised.
+     *
+     * <p>Logged at INFO because passive port assignment cannot be reconstructed after the fact:
+     * the 227 reply is written asynchronously, so the reply seen next to a command in the log is
+     * not necessarily the reply to that command.</p>
+     *
+     * @param how {@code bound} for a dedicated listener, {@code reserved} when multiplexing
+     */
+    private void logPassiveGrant(String how) {
+        InetAddress control = controlAddress();
+        LOG.info("Passive port {}: session={} user={} passivePort={} control={}",
+                how,
+                session != null ? session.getSessionId() : null,
+                userName(),
+                port,
+                control != null ? control.getHostAddress() : "<unknown>");
+    }
+
+    /**
+     * Records a passive data connection at accept time: which passive port it landed on, where it
+     * actually came from, and how long the transfer waited for it.
+     *
+     * <p>The source address and port are the point of this. Without them there is no way to tell a
+     * correctly matched data connection from one opened by a different client that happened to
+     * reach this listener — the blind spot behind the mislabelled uploads investigated in
+     * varanus-pos-ftp#38, where a file's contents did not match its name and nothing in the logs
+     * could say why.</p>
+     */
+    private void logPassiveAccept() {
+        if (dataSoc == null) {
+            return;
+        }
+
+        InetAddress dataAddress = dataSoc.getInetAddress();
+        InetAddress control = controlAddress();
+        long now = System.currentTimeMillis();
+        long sincePasvMillis = requestTime > 0 ? now - requestTime : -1;
+        // Time actually spent blocked in accept(). A value near zero means the connection was
+        // already sitting in the listener's backlog before the transfer command was processed —
+        // i.e. the client connected ahead of the command the server is currently running, which
+        // is what a name/content mismatch would look like from this side.
+        long acceptWaitMillis = acceptStartTime > 0 ? now - acceptStartTime : -1;
+
+        LOG.info("Passive data connection accepted: session={} user={} passivePort={} from={}:{} "
+                        + "control={} sincePasvMs={} acceptWaitMs={}",
+                session != null ? session.getSessionId() : null,
+                userName(),
+                port,
+                dataAddress != null ? dataAddress.getHostAddress() : "<unknown>",
+                dataSoc.getPort(),
+                control != null ? control.getHostAddress() : "<unknown>",
+                sincePasvMillis,
+                acceptWaitMillis);
+
+        // Deliberately independent of passiveIpCheck, which defaults to false and is disabled in
+        // production: with that guard off we would otherwise keep no record at all of a data
+        // connection arriving from somewhere other than the session that asked for it.
+        // Use the same comparison the check itself uses, so this warning predicts exactly what
+        // enabling passiveIpCheck would reject. A plain equals() would report IPv4-mapped IPv6 and
+        // IPv4 forms of one address as a mismatch, which the check tolerates — over-reporting that
+        // would make this log misleading precisely when it is being used to decide whether the
+        // check is safe to turn on.
+        if (dataAddress != null && control != null && !isSameAddressForPassiveIpCheck(control, dataAddress)) {
+            boolean checkEnabled = session.getListener().getDataConnectionConfiguration()
+                    .isPassiveIpCheck();
+            LOG.warn("Passive data connection SOURCE MISMATCH: session={} user={} passivePort={} "
+                            + "arrived from {} but this session's control connection is {} "
+                            + "(passiveIpCheck={} - connection {})",
+                    session.getSessionId(),
+                    userName(),
+                    port,
+                    dataAddress.getHostAddress(),
+                    control.getHostAddress(),
+                    checkEnabled,
+                    checkEnabled ? "will be rejected" : "IS BEING USED");
+        }
+    }
+
+    private boolean isMultiplexEnabled(DataConnectionConfiguration cfg) {
+        if (cfg instanceof DefaultDataConnectionConfiguration) {
+            return ((DefaultDataConnectionConfiguration) cfg).isMultiplexPassivePorts();
+        }
+        return false;
+    }
+
+    /**
+     * Compare client addresses for passive IP checks while handling IPv4-mapped IPv6.
+     * This avoids rejecting valid connections where control and data sockets use
+     * different address-family representations of the same endpoint.
+     */
+    static boolean isSameAddressForPassiveIpCheck(InetAddress expected, InetAddress actual) {
+        if (expected == null || actual == null) {
+            return false;
+        }
+        byte[] expectedBytes = normalizeMappedIpv4(expected.getAddress());
+        byte[] actualBytes = normalizeMappedIpv4(actual.getAddress());
+        return java.util.Arrays.equals(expectedBytes, actualBytes);
+    }
+
+    private static byte[] normalizeMappedIpv4(byte[] raw) {
+        if (isIpv4MappedIpv6(raw)) {
+            byte[] ipv4 = new byte[4];
+            System.arraycopy(raw, 12, ipv4, 0, 4);
+            return ipv4;
+        }
+        return raw;
+    }
+
+    private static boolean isIpv4MappedIpv6(byte[] raw) {
+        if (raw == null || raw.length != 16) {
+            return false;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            if (raw[i] != 0) {
+                return false;
+            }
+        }
+        return raw[10] == (byte) 0xFF && raw[11] == (byte) 0xFF;
     }
 
     /**

@@ -180,4 +180,102 @@ public class PassivePortsTest extends TestCase {
         assertEquals(0, valid.size());
     }
 
+
+    /**
+     * A waiter is handed the port another thread gives back, rather than failing outright.
+     */
+    public void testWaitIsSatisfiedByARelease() throws Exception {
+        final PassivePorts ports = new PassivePorts("123", false);
+        assertEquals(123, ports.reserveNextPort());
+
+        Thread releaser = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                ports.releasePort(123);
+            }
+        });
+        releaser.start();
+
+        long start = System.currentTimeMillis();
+        int reserved = ports.reserveNextPort(list(123), 5000);
+        long elapsed = System.currentTimeMillis() - start;
+        releaser.join();
+
+        assertEquals(123, reserved);
+        assertTrue("should have waited for the release, waited " + elapsed + "ms", elapsed >= 50);
+    }
+
+    /**
+     * A pool that stays exhausted still fails, so an outage does not hang the caller forever.
+     */
+    public void testWaitGivesUpAtTheDeadline() {
+        PassivePorts ports = new PassivePorts("123", false);
+        assertEquals(123, ports.reserveNextPort());
+
+        long start = System.currentTimeMillis();
+        int reserved = ports.reserveNextPort(list(123), 200);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals(-1, reserved);
+        assertTrue("should have waited for the deadline, waited " + elapsed + "ms", elapsed >= 150);
+    }
+
+    /**
+     * Zero keeps the old fail-fast behaviour, so callers that must not block are unaffected.
+     */
+    public void testZeroTimeoutDoesNotWait() {
+        PassivePorts ports = new PassivePorts("123", false);
+        assertEquals(123, ports.reserveNextPort());
+
+        long start = System.currentTimeMillis();
+        assertEquals(-1, ports.reserveNextPort(list(123), 0));
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue("should not have waited, waited " + elapsed + "ms", elapsed < 100);
+    }
+
+    /**
+     * Releasing a port outside the waiter's allow-list must not satisfy it. Waiters share one
+     * monitor and are all woken together, so each has to re-test its own list rather than take
+     * whatever came back.
+     */
+    public void testReleaseOutsideTheAllowListDoesNotSatisfyAWaiter() throws Exception {
+        final PassivePorts ports = new PassivePorts("123, 456", false);
+        assertEquals(123, ports.reserveNextPort(list(123), 0));
+        assertEquals(456, ports.reserveNextPort(list(456), 0));
+
+        Thread releaser = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                // Not the port the waiter is allowed to use.
+                ports.releasePort(456);
+            }
+        });
+        releaser.start();
+
+        int reserved = ports.reserveNextPort(list(123), 300);
+        releaser.join();
+
+        assertEquals(-1, reserved);
+        // The released port is still free; it simply was not this waiter's to take.
+        assertEquals(456, ports.reserveNextPort(list(456), 0));
+    }
+
+    private static List<Integer> list(int... values) {
+        List<Integer> result = new ArrayList<Integer>();
+        for (int value : values) {
+            result.add(Integer.valueOf(value));
+        }
+        return result;
+    }
 }
