@@ -237,6 +237,23 @@ public class DefaultDataConnectionConfiguration implements
     }
 
     /**
+     * Get a passive data port from the given allow-list, waiting up to <code>timeoutMillis</code>
+     * for one to be released, or -1 when none becomes free in time.
+     * <p>
+     * <strong>Deliberately not <code>synchronized</code>.</strong> Waiting happens inside
+     * {@link PassivePorts}, which does its own locking, and releasing goes through
+     * {@link #releasePassivePort(int)} on <em>this</em> monitor. Holding this monitor while waiting
+     * would lock out every release and guarantee that no port could ever come back, turning the
+     * wait into a deadlock that only ends at the timeout.
+     *
+     * {@inheritDoc}
+     */
+    @Override
+    public int requestPassivePort(final java.util.List<Integer> allowedPorts, final long timeoutMillis) {
+        return passivePorts.reserveNextPort(allowedPorts, timeoutMillis);
+    }
+
+    /**
      * Retrive the passive ports configured for this data connection
      *
      * @return The String of passive ports
