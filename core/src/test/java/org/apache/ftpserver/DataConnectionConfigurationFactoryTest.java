@@ -18,6 +18,9 @@
  */
 package org.apache.ftpserver;
 
+import java.util.Arrays;
+import java.util.List;
+
 import org.apache.ftpserver.impl.DefaultDataConnectionConfiguration;
 import org.junit.Test;
 
@@ -54,5 +57,42 @@ public class DataConnectionConfigurationFactoryTest {
         DataConnectionConfiguration config = factory.createDataConnectionConfiguration();
         assertTrue(config instanceof DefaultDataConnectionConfiguration);
         assertEquals(42, ((DefaultDataConnectionConfiguration) config).getMaxTotalPassiveReservations());
+    }
+
+    /**
+     * Regression guard for a deadlock that is easy to reintroduce.
+     * <p>
+     * The waiting overload must NOT be <code>synchronized</code>. Waiting happens inside
+     * PassivePorts, but releasing goes through {@link DefaultDataConnectionConfiguration
+     * #releasePassivePort(int)}, which IS synchronized on the configuration object. If the waiter
+     * held that same monitor, no release could ever run and the wait could only ever end at the
+     * timeout. This test fails with -1 if that happens.
+     */
+    @Test
+    public void waitingForAPassivePortDoesNotLockOutTheRelease() throws Exception {
+        DataConnectionConfigurationFactory factory = new DataConnectionConfigurationFactory();
+        factory.setPassivePorts("60123");
+        final DataConnectionConfiguration config = factory.createDataConnectionConfiguration();
+        final List<Integer> allowed = Arrays.asList(Integer.valueOf(60123));
+
+        assertEquals(60123, config.requestPassivePort(allowed, 0));
+
+        Thread releaser = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                config.releasePassivePort(60123);
+            }
+        });
+        releaser.start();
+
+        int reserved = config.requestPassivePort(allowed, 5000);
+        releaser.join();
+
+        assertEquals("release was locked out by the waiter", 60123, reserved);
     }
 }
