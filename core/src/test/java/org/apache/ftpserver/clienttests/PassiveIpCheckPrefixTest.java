@@ -34,11 +34,16 @@ import org.apache.ftpserver.DataConnectionConfigurationFactory;
  * The passive IP check with a prefix: the control connection comes from 127.0.0.1 and the data
  * connection from another loopback address, in the same /24 or not.
  * <p>
+ * A rejected data connection ends the STOR with 551: the check closes the accepted socket and the
+ * transfer then fails, as it always has with the exact check.
+ * <p>
  * Each test needs its data address to be bindable. Linux routes all of 127.0.0.0/8 to the loopback
  * interface; other systems may only have 127.0.0.1, and there the tests that need another address
  * return without asserting.
  */
 public class PassiveIpCheckPrefixTest extends ClientTestTemplate {
+
+    private static final int REJECTED = 551;
 
     private static final Pattern PASV_PORT = Pattern.compile("\\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\)");
 
@@ -88,7 +93,7 @@ public class PassiveIpCheckPrefixTest extends ClientTestTemplate {
         if (!bindable("127.0.0.2")) {
             return;
         }
-        assertEquals(425, storeWithDataFrom("127.0.0.2"));
+        assertEquals(REJECTED, storeWithDataFrom("127.0.0.2"));
     }
 
     public void testNeighbourIsAcceptedWithPrefix24() throws Exception {
@@ -102,7 +107,7 @@ public class PassiveIpCheckPrefixTest extends ClientTestTemplate {
         if (!bindable("127.0.1.2")) {
             return;
         }
-        assertEquals(425, storeWithDataFrom("127.0.1.2"));
+        assertEquals(REJECTED, storeWithDataFrom("127.0.1.2"));
     }
 
     /**
