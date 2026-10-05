@@ -466,7 +466,7 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
                     InetAddress remoteAddress = ((InetSocketAddress) session.getRemoteAddress()).getAddress();
                     InetAddress dataSocketAddress = dataSoc.getInetAddress();
 
-                    if (!isSameAddressForPassiveIpCheck(remoteAddress, dataSocketAddress)) {
+                    if (!isSameAddressForPassiveIpCheck(remoteAddress, dataSocketAddress, dataConfig)) {
                         LOG.warn("Passive IP Check failed. Closing data connection from " + dataSocketAddress +
                             " as it does not match the expected address " + remoteAddress);
                         closeDataConnection();
@@ -657,9 +657,10 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
         // IPv4 forms of one address as a mismatch, which the check tolerates — over-reporting that
         // would make this log misleading precisely when it is being used to decide whether the
         // check is safe to turn on.
-        if (dataAddress != null && control != null && !isSameAddressForPassiveIpCheck(control, dataAddress)) {
-            boolean checkEnabled = session.getListener().getDataConnectionConfiguration()
-                    .isPassiveIpCheck();
+        DataConnectionConfiguration dataConfig = session.getListener().getDataConnectionConfiguration();
+        if (dataAddress != null && control != null
+                && !isSameAddressForPassiveIpCheck(control, dataAddress, dataConfig)) {
+            boolean checkEnabled = dataConfig.isPassiveIpCheck();
             LOG.warn("Passive data connection SOURCE MISMATCH: session={} user={} passivePort={} "
                             + "arrived from {} but this session's control connection is {} "
                             + "(passiveIpCheck={} - connection {})",
@@ -686,12 +687,44 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      * different address-family representations of the same endpoint.
      */
     static boolean isSameAddressForPassiveIpCheck(InetAddress expected, InetAddress actual) {
+        return isSameAddressForPassiveIpCheck(expected, actual, 32, 128);
+    }
+
+    private static boolean isSameAddressForPassiveIpCheck(InetAddress expected, InetAddress actual,
+            DataConnectionConfiguration config) {
+        return isSameAddressForPassiveIpCheck(expected, actual, config.getPassiveIpCheckIpv4PrefixLength(),
+                config.getPassiveIpCheckIpv6PrefixLength());
+    }
+
+    /**
+     * Like {@link #isSameAddressForPassiveIpCheck(InetAddress, InetAddress)}, but only the first
+     * <code>ipv4PrefixLength</code> (IPv4) or <code>ipv6PrefixLength</code> (IPv6) bits must match.
+     * Addresses of different families never match.
+     */
+    static boolean isSameAddressForPassiveIpCheck(InetAddress expected, InetAddress actual,
+            int ipv4PrefixLength, int ipv6PrefixLength) {
         if (expected == null || actual == null) {
             return false;
         }
         byte[] expectedBytes = normalizeMappedIpv4(expected.getAddress());
         byte[] actualBytes = normalizeMappedIpv4(actual.getAddress());
-        return java.util.Arrays.equals(expectedBytes, actualBytes);
+        if (expectedBytes.length != actualBytes.length) {
+            return false;
+        }
+        int bits = expectedBytes.length == 4 ? ipv4PrefixLength : ipv6PrefixLength;
+        bits = Math.max(0, Math.min(bits, expectedBytes.length * 8));
+        int wholeBytes = bits / 8;
+        for (int i = 0; i < wholeBytes; i++) {
+            if (expectedBytes[i] != actualBytes[i]) {
+                return false;
+            }
+        }
+        int remainingBits = bits % 8;
+        if (remainingBits == 0) {
+            return true;
+        }
+        int mask = (0xFF << (8 - remainingBits)) & 0xFF;
+        return (expectedBytes[wholeBytes] & mask) == (actualBytes[wholeBytes] & mask);
     }
 
     private static byte[] normalizeMappedIpv4(byte[] raw) {

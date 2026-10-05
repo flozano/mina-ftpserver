@@ -114,6 +114,28 @@ public interface DataConnectionConfiguration {
     boolean isPassiveIpCheck();
 
     /**
+     * How many leading bits of its IPv4 address a passive data connection must share with the
+     * control connection when {@link #isPassiveIpCheck()} is enabled. 32, the default, requires
+     * the very same address. A shorter prefix, such as 24, also accepts a client whose network
+     * sends its data connection out through a neighbouring address, as some NAT pools do.
+     *
+     * @return The IPv4 prefix length, 0 to 32
+     */
+    default int getPassiveIpCheckIpv4PrefixLength() {
+        return 32;
+    }
+
+    /**
+     * The IPv6 counterpart of {@link #getPassiveIpCheckIpv4PrefixLength()}. 128, the default,
+     * requires the very same address.
+     *
+     * @return The IPv6 prefix length, 0 to 128
+     */
+    default int getPassiveIpCheckIpv6PrefixLength() {
+        return 128;
+    }
+
+    /**
      * Request a passive port. Will block until a port is available
      * @return A free passive part
      */

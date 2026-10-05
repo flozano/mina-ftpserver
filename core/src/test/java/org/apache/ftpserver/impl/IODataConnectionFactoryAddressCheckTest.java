@@ -53,6 +53,57 @@ public class IODataConnectionFactoryAddressCheckTest {
         assertTrue(IODataConnectionFactory.isSameAddressForPassiveIpCheck(expected, actual));
     }
 
+    @Test
+    public void aPrefixAcceptsTheSameNetworkOnly() throws Exception {
+        InetAddress control = InetAddress.getByName("203.0.113.24");
+
+        assertTrue(same(control, InetAddress.getByName("203.0.113.27"), 24));
+        assertTrue(same(control, InetAddress.getByName("203.0.113.255"), 24));
+        assertFalse(same(control, InetAddress.getByName("203.0.114.27"), 24));
+        assertFalse(same(control, InetAddress.getByName("198.51.100.24"), 24));
+        // the default compares the whole address
+        assertFalse(same(control, InetAddress.getByName("203.0.113.27"), 32));
+        assertTrue(same(control, InetAddress.getByName("203.0.113.24"), 32));
+    }
+
+    @Test
+    public void aPrefixNeedNotEndOnAByte() throws Exception {
+        InetAddress control = InetAddress.getByName("203.0.113.24"); // ...0001 1000
+
+        assertTrue(same(control, InetAddress.getByName("203.0.113.31"), 29)); // ...0001 1111
+        assertFalse(same(control, InetAddress.getByName("203.0.113.32"), 29)); // ...0010 0000
+        assertTrue(same(control, InetAddress.getByName("198.51.100.1"), 0));
+    }
+
+    @Test
+    public void aPrefixAppliesToMappedIpv4AsToIpv4() throws Exception {
+        assertTrue(same(InetAddress.getByName("203.0.113.24"), mappedIpv4(203, 0, 113, 27), 24));
+        assertFalse(same(InetAddress.getByName("203.0.113.24"), mappedIpv4(203, 0, 114, 27), 24));
+    }
+
+    @Test
+    public void ipv6UsesItsOwnPrefix() throws Exception {
+        InetAddress control = InetAddress.getByName("2001:db8:1:2::10");
+
+        assertTrue(IODataConnectionFactory.isSameAddressForPassiveIpCheck(control,
+                InetAddress.getByName("2001:db8:1:2::99"), 24, 64));
+        assertFalse(IODataConnectionFactory.isSameAddressForPassiveIpCheck(control,
+                InetAddress.getByName("2001:db8:1:3::10"), 24, 64));
+        // the IPv4 prefix does not leak into IPv6
+        assertFalse(IODataConnectionFactory.isSameAddressForPassiveIpCheck(control,
+                InetAddress.getByName("2001:db8:1:2::99"), 24, 128));
+    }
+
+    @Test
+    public void differentFamiliesNeverMatch() throws Exception {
+        assertFalse(IODataConnectionFactory.isSameAddressForPassiveIpCheck(
+                InetAddress.getByName("203.0.113.24"), InetAddress.getByName("2001:db8::1"), 0, 0));
+    }
+
+    private static boolean same(InetAddress expected, InetAddress actual, int ipv4PrefixLength) {
+        return IODataConnectionFactory.isSameAddressForPassiveIpCheck(expected, actual, ipv4PrefixLength, 128);
+    }
+
     private InetAddress mappedIpv4(int a, int b, int c, int d) throws Exception {
         byte[] mapped = new byte[16];
         mapped[10] = (byte) 0xFF;

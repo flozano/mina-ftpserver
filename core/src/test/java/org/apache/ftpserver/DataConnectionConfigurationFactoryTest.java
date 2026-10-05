@@ -95,4 +95,44 @@ public class DataConnectionConfigurationFactoryTest {
 
         assertEquals("release was locked out by the waiter", 60123, reserved);
     }
+
+    @Test
+    public void passiveIpCheckComparesWholeAddressesByDefault() {
+        DataConnectionConfiguration config = new DataConnectionConfigurationFactory().createDataConnectionConfiguration();
+
+        assertEquals(32, config.getPassiveIpCheckIpv4PrefixLength());
+        assertEquals(128, config.getPassiveIpCheckIpv6PrefixLength());
+    }
+
+    @Test
+    public void passiveIpCheckPrefixLengthsReachTheConfiguration() {
+        DataConnectionConfigurationFactory factory = new DataConnectionConfigurationFactory();
+        factory.setPassiveIpCheckIpv4PrefixLength(24);
+        factory.setPassiveIpCheckIpv6PrefixLength(64);
+        DataConnectionConfiguration config = factory.createDataConnectionConfiguration();
+
+        assertEquals(24, config.getPassiveIpCheckIpv4PrefixLength());
+        assertEquals(64, config.getPassiveIpCheckIpv6PrefixLength());
+    }
+
+    @Test
+    public void passiveIpCheckPrefixLengthsAreValidated() {
+        DataConnectionConfigurationFactory factory = new DataConnectionConfigurationFactory();
+        for (int invalid : new int[] {-1, 33}) {
+            try {
+                factory.setPassiveIpCheckIpv4PrefixLength(invalid);
+                fail("accepted IPv4 prefix length " + invalid);
+            } catch (FtpServerConfigurationException expected) {
+                // expected
+            }
+        }
+        for (int invalid : new int[] {-1, 129}) {
+            try {
+                factory.setPassiveIpCheckIpv6PrefixLength(invalid);
+                fail("accepted IPv6 prefix length " + invalid);
+            } catch (FtpServerConfigurationException expected) {
+                // expected
+            }
+        }
+    }
 }
