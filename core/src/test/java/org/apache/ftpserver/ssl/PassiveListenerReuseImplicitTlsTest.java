@@ -45,7 +45,7 @@ public class PassiveListenerReuseImplicitTlsTest extends ImplicitSecurityTestTem
         DataConnectionConfigurationFactory factory = super.createDataConnectionConfigurationFactory();
         factory.setImplicitSsl(true);
         factory.setMultiplexPassivePorts(false);
-        factory.setPassivePorts("50073-50074");
+        factory.setPassivePorts("23073-23074");
         factory.setPassiveReuseUnusedListener(true);
         return factory;
     }

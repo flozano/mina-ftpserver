@@ -45,7 +45,7 @@ import org.apache.ftpserver.DataConnectionConfigurationFactory;
 public abstract class PassiveListenerTestTemplate extends ClientTestTemplate {
 
     /** Two passive ports: when a session gives one back, the next session to ask gets it. */
-    private static final String PASSIVE_PORTS = "50071-50072";
+    private static final String PASSIVE_PORTS = "23071-23072";
 
     private static final Pattern PASV_PORT = Pattern.compile("\\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\)");
 
