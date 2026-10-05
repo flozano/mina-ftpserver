@@ -264,6 +264,13 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             return new InetSocketAddress(address, port);
         } catch (Exception ex) {
             closeDataConnection();
+            // The address was set before the passive port was requested, and closeDataConnection()
+            // leaves it. Kept, it makes the session look like active mode towards our own address
+            // (passive=false, port 0): a following STOR/RETR/LIST passes the "PORT or PASV first"
+            // check, answers 150, and tries to connect to that address before failing with 425. No
+            // data connection was offered, so clear it: those commands then answer 503, as they do
+            // when no PASV/PORT was ever sent.
+            address = null;
             throw new DataConnectionException("Failed to initate passive data connection: " + ex.getMessage(), ex);
         }
     }
