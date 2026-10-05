@@ -181,6 +181,18 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
      */
     public synchronized InetSocketAddress initPassiveDataConnection() throws DataConnectionException {
         LOG.debug("Initiating passive data connection");
+
+        DataConnectionConfiguration reuseConfig = session.getListener().getDataConnectionConfiguration();
+        if (reuseConfig.isPassiveReuseUnusedListener() && !isMultiplexEnabled(reuseConfig)
+                && hasUnusedPassiveListener()) {
+            // The client may already have read the reply that advertised this listener and be
+            // connecting to it. Closing it would hand its port to the next session that asks;
+            // see DataConnectionConfiguration#isPassiveReuseUnusedListener().
+            requestTime = System.currentTimeMillis();
+            logPassiveGrant("re-advertised");
+            return new InetSocketAddress(address, port);
+        }
+
         // close old sockets if any
         closeDataConnection();
 
@@ -273,6 +285,15 @@ public class IODataConnectionFactory implements ServerDataConnectionFactory {
             address = null;
             throw new DataConnectionException("Failed to initate passive data connection: " + ex.getMessage(), ex);
         }
+    }
+
+    /**
+     * A passive listener this session was given and has not used yet: bound, open, and no data
+     * connection taken from it.
+     */
+    private boolean hasUnusedPassiveListener() {
+        return passive && servSoc != null && servSoc.isBound() && !servSoc.isClosed() && dataSoc == null
+                && address != null && port > 0;
     }
 
     /*

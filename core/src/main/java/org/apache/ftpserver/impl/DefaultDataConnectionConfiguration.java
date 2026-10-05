@@ -48,6 +48,7 @@ public class DefaultDataConnectionConfiguration implements
     private final boolean passiveIpCheck;
     private final int passiveIpCheckIpv4PrefixLength;
     private final int passiveIpCheckIpv6PrefixLength;
+    private final boolean passiveReuseUnusedListener;
 
     private final boolean implicitSsl;
     private final boolean multiplexPassivePorts;
@@ -72,6 +73,7 @@ public class DefaultDataConnectionConfiguration implements
      * @param maxTotalPassiveReservations Global cap for multiplexed passive reservations
      * @param passiveIpCheckIpv4PrefixLength IPv4 bits the passive IP check compares, 0 to 32
      * @param passiveIpCheckIpv6PrefixLength IPv6 bits the passive IP check compares, 0 to 128
+     * @param passiveReuseUnusedListener Re-advertise an unused passive listener on PASV/EPSV
      *
      */
     public DefaultDataConnectionConfiguration(int idleTime,
@@ -80,7 +82,7 @@ public class DefaultDataConnectionConfiguration implements
         PassivePorts passivePorts, String passiveExternalAddress,
         boolean passiveIpCheck, boolean implicitSsl, boolean multiplexPassivePorts,
         int maxTotalPassiveReservations, int passiveIpCheckIpv4PrefixLength,
-        int passiveIpCheckIpv6PrefixLength) {
+        int passiveIpCheckIpv6PrefixLength, boolean passiveReuseUnusedListener) {
         this.idleTime = idleTime;
         this.ssl = ssl;
         this.activeEnabled = activeEnabled;
@@ -96,6 +98,39 @@ public class DefaultDataConnectionConfiguration implements
         this.maxTotalPassiveReservations = maxTotalPassiveReservations;
         this.passiveIpCheckIpv4PrefixLength = passiveIpCheckIpv4PrefixLength;
         this.passiveIpCheckIpv6PrefixLength = passiveIpCheckIpv6PrefixLength;
+        this.passiveReuseUnusedListener = passiveReuseUnusedListener;
+    }
+
+    /**
+     * Constructor without re-advertising unused passive listeners.
+     *
+     * @param idleTime The idle time
+     * @param ssl he SSL Configuration
+     * @param activeEnabled Is active mode enabled?
+     * @param activeIpCheck The activa IP check
+     * @param activeLocalAddress The active local address
+     * @param activeLocalPort The active local port
+     * @param passiveAddress The passive address
+     * @param passivePorts The passive ports
+     * @param passiveExternalAddress The passive external address
+     * @param passiveIpCheck The passive IP check
+     * @param implicitSsl Implicit SSL
+     * @param multiplexPassivePorts Enable passive port multiplexing per client IP
+     * @param maxTotalPassiveReservations Global cap for multiplexed passive reservations
+     * @param passiveIpCheckIpv4PrefixLength IPv4 bits the passive IP check compares, 0 to 32
+     * @param passiveIpCheckIpv6PrefixLength IPv6 bits the passive IP check compares, 0 to 128
+     */
+    public DefaultDataConnectionConfiguration(int idleTime,
+        SslConfiguration ssl, boolean activeEnabled, boolean activeIpCheck,
+        String activeLocalAddress, int activeLocalPort, String passiveAddress,
+        PassivePorts passivePorts, String passiveExternalAddress,
+        boolean passiveIpCheck, boolean implicitSsl, boolean multiplexPassivePorts,
+        int maxTotalPassiveReservations, int passiveIpCheckIpv4PrefixLength,
+        int passiveIpCheckIpv6PrefixLength) {
+        this(idleTime, ssl, activeEnabled, activeIpCheck, activeLocalAddress, activeLocalPort,
+            passiveAddress, passivePorts, passiveExternalAddress, passiveIpCheck,
+            implicitSsl, multiplexPassivePorts, maxTotalPassiveReservations,
+            passiveIpCheckIpv4PrefixLength, passiveIpCheckIpv6PrefixLength, false);
     }
 
     /**
@@ -259,6 +294,11 @@ public class DefaultDataConnectionConfiguration implements
     @Override
     public int getPassiveIpCheckIpv6PrefixLength() {
         return passiveIpCheckIpv6PrefixLength;
+    }
+
+    @Override
+    public boolean isPassiveReuseUnusedListener() {
+        return passiveReuseUnusedListener;
     }
 
     /**

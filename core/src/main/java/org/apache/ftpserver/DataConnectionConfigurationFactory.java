@@ -53,6 +53,7 @@ public class DataConnectionConfigurationFactory {
     private boolean passiveIpCheck = false;
     private int passiveIpCheckIpv4PrefixLength = 32;
     private int passiveIpCheckIpv6PrefixLength = 128;
+    private boolean passiveReuseUnusedListener = false;
     private boolean implicitSsl;
     private boolean multiplexPassivePorts;
     private int maxTotalPassiveReservations;
@@ -76,7 +77,7 @@ public class DataConnectionConfigurationFactory {
                 passiveAddress, passivePorts,
                 passiveExternalAddress, passiveIpCheck, implicitSsl, multiplexPassivePorts,
                 maxTotalPassiveReservations, passiveIpCheckIpv4PrefixLength,
-                passiveIpCheckIpv6PrefixLength);
+                passiveIpCheckIpv6PrefixLength, passiveReuseUnusedListener);
     }
     /*
      * (Non-Javadoc)
@@ -265,6 +266,25 @@ public class DataConnectionConfigurationFactory {
      */
     public int getPassiveIpCheckIpv6PrefixLength() {
         return passiveIpCheckIpv6PrefixLength;
+    }
+
+    /**
+     * Sets whether PASV/EPSV re-advertises the session's unused passive listener instead of
+     * replacing it, so that its port is not released while the client may still connect to it.
+     *
+     * @param reuse <code>true</code> to re-advertise
+     * @see DataConnectionConfiguration#isPassiveReuseUnusedListener()
+     */
+    public void setPassiveReuseUnusedListener(boolean reuse) {
+        this.passiveReuseUnusedListener = reuse;
+    }
+
+    /**
+     * @return Whether PASV/EPSV re-advertises an unused passive listener
+     * @see DataConnectionConfiguration#isPassiveReuseUnusedListener()
+     */
+    public boolean isPassiveReuseUnusedListener() {
+        return passiveReuseUnusedListener;
     }
 
     /**
