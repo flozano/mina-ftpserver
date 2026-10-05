@@ -136,6 +136,25 @@ public interface DataConnectionConfiguration {
     }
 
     /**
+     * Whether a PASV/EPSV that arrives while the session still holds an unused passive listener
+     * re-advertises that listener instead of closing it and binding a new port.
+     * <p>
+     * Closing it returns its port to the pool at once, although the client may already have read
+     * the first reply and be about to connect there - typically a client that sent PASV twice
+     * without waiting. If another session is given that port in the meantime, it accepts this
+     * client's data connection and stores the data as its own file. Re-advertising keeps the port
+     * with the session that was given it, so whichever reply the client acts on, it connects to its
+     * own session. A session only ever has one transfer at a time, so it never needs two listeners.
+     * <p>
+     * Applies when passive ports are not multiplexed. Defaults to <code>false</code>.
+     *
+     * @return <code>true</code> to re-advertise an unused passive listener
+     */
+    default boolean isPassiveReuseUnusedListener() {
+        return false;
+    }
+
+    /**
      * Request a passive port. Will block until a port is available
      * @return A free passive part
      */

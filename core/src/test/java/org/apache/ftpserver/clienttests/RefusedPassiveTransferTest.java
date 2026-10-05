@@ -40,7 +40,7 @@ import org.apache.ftpserver.impl.IODataConnectionFactory;
 public class RefusedPassiveTransferTest extends ClientTestTemplate {
 
     /** The only passive port: whoever holds it makes every other PASV fail. */
-    private static final int ONLY_PASSIVE_PORT = 50031;
+    private static final int ONLY_PASSIVE_PORT = 23031;
 
     private FTPClient holder;
 

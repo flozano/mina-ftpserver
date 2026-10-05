@@ -58,7 +58,7 @@ public class PassiveIpCheckPrefixTest extends ClientTestTemplate {
     protected DataConnectionConfigurationFactory createDataConnectionConfigurationFactory() {
         DataConnectionConfigurationFactory factory = new DataConnectionConfigurationFactory();
         factory.setMultiplexPassivePorts(false);
-        factory.setPassivePorts("50040-50045");
+        factory.setPassivePorts("23040-23045");
         factory.setPassiveIpCheck(true);
         factory.setPassiveIpCheckIpv4PrefixLength(prefixLength());
         return factory;
