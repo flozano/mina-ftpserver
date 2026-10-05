@@ -101,6 +101,7 @@ public abstract class AbstractListener implements Listener {
      * @param dataConnectionConfig The data connection configuration
      * @param idleTimeout Idle timeout
      * @param sessionFilter The sessions filter
+     * @param proxyProtocol Whether connections start with a PROXY protocol header
      */
     public AbstractListener(String serverAddress, int port,
             boolean implicitSsl, SslConfiguration sslConfiguration,

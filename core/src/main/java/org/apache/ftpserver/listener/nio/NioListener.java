@@ -109,13 +109,15 @@ public class NioListener extends AbstractListener {
      */
     public NioListener(String serverAddress, int port, boolean implicitSsl, SslConfiguration sslConfiguration,
         DataConnectionConfiguration dataConnectionConfig, int idleTimeout, SessionFilter sessionFilter) {
-        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter, false);
+        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter,
+            false);
     }
 
     public NioListener(String serverAddress, int port, boolean implicitSsl, SslConfiguration sslConfiguration,
         DataConnectionConfiguration dataConnectionConfig, int idleTimeout, SessionFilter sessionFilter,
         boolean proxyProtocol) {
-        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter, proxyProtocol);
+        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter,
+            proxyProtocol);
     }
 
     /**
