@@ -41,6 +41,7 @@ import org.apache.ftpserver.listener.Listener;
 import org.apache.ftpserver.listener.ListenerFactory;
 import org.apache.ftpserver.ssl.ClientAuth;
 import org.apache.ftpserver.ssl.SslConfiguration;
+import org.apache.ftpserver.ssl.impl.NoReverseDnsSslFilter;
 import org.apache.mina.core.session.IdleStatus;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
@@ -199,7 +200,8 @@ public class NioListener extends AbstractListener {
                 SslFilter ssl_filter;
 
                 try {
-                    ssl_filter = new SslFilter(ssl_conf.getSSLContext());
+                    // never SslFilter itself: it reverse-resolves every client IP on connect
+                    ssl_filter = new NoReverseDnsSslFilter(ssl_conf.getSSLContext());
                 } catch (GeneralSecurityException e) {
                     throw new FtpServerConfigurationException("SSL could not be initialized, check configuration");
                 }
