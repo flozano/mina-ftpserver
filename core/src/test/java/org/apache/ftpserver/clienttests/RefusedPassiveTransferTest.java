@@ -75,10 +75,21 @@ public class RefusedPassiveTransferTest extends ClientTestTemplate {
         assertEquals(227, holder.sendCommand("PASV"));
     }
 
+    /**
+     * Ends the holder's session and waits until the server has released its port: that happens
+     * when the server finishes closing the session, after the client has already disconnected.
+     */
     private void releaseTheOnlyPassivePort() throws Exception {
         holder.logout();
         holder.disconnect();
         holder = null;
+
+        long deadline = System.currentTimeMillis() + 5000;
+        int reply;
+        while ((reply = client.sendCommand("PASV")) != 227 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertEquals("the port was not released within 5 s", 227, reply);
     }
 
     public void testStorWithoutPasvIs503() throws Exception {
