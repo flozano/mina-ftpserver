@@ -16,35 +16,16 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.ftpserver.clienttests;
 
-import org.apache.commons.net.ftp.FTPReply;
-
 /**
-*
-* @author <a href="http://mina.apache.org">Apache MINA Project</a>
-*
-*/
-public class SystTest extends ClientTestTemplate {
+ * {@link PassiveListenerTestTemplate} with the default behaviour, where every PASV replaces the
+ * listener. Documents what reuse changes, including the data crossing between sessions.
+ */
+public class PassiveListenerReplaceTest extends PassiveListenerTestTemplate {
 
-    /*
-     * (non-Javadoc)
-     * 
-     * @see org.apache.ftpserver.clienttests.ClientTestTemplate#setUp()
-     */
     @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-
-        client.login(ADMIN_USERNAME, ADMIN_PASSWORD);
+    protected boolean reuse() {
+        return false;
     }
-
-    public void testSyst() throws Exception {
-        assertTrue(FTPReply.isPositiveCompletion(client.syst()));
-        // hardcoded to Unix as that's the type of list etc we use
-        assertEquals("215 UNIX Type: FTP Service", client.getReplyString()
-                .trim());
-    }
-
 }

@@ -112,6 +112,12 @@ public class FtpIoSession implements IoSession {
     /** Cached remote address attribute */
     private static final String ATTRIBUTE_CACHED_REMOTE_ADDRESS =   ATTRIBUTE_PREFIX + "cached-remote-address";
 
+    /** Proxy protocol remote address attribute (set by ProxyProtocolFilter) */
+    private static final String ATTRIBUTE_PROXY_REMOTE_ADDRESS =    ATTRIBUTE_PREFIX + "proxy-remote-address";
+
+    /** Proxy protocol local address attribute (set by ProxyProtocolFilter) */
+    private static final String ATTRIBUTE_PROXY_LOCAL_ADDRESS =     ATTRIBUTE_PREFIX + "proxy-local-address";
+
     /** The encapsulated IoSession instance */
     private final IoSession wrappedSession;
 
@@ -306,6 +312,23 @@ public class FtpIoSession implements IoSession {
      * {@inheritDoc}
      */
     public SocketAddress getLocalAddress() {
+        if (containsAttribute(ATTRIBUTE_PROXY_LOCAL_ADDRESS)) {
+            return (SocketAddress) getAttribute(ATTRIBUTE_PROXY_LOCAL_ADDRESS);
+        }
+        return wrappedSession.getLocalAddress();
+    }
+
+    /**
+     * The address this session's socket is actually bound to on this host, ignoring anything
+     * supplied by PROXY protocol.
+     * <p>
+     * {@link #getLocalAddress()} reports the destination the client connected to, which behind a
+     * proxy belongs to the proxy rather than to us. That is the right address to report back to a
+     * client, but it cannot be bound here, so anything opening a local socket must use this one.
+     *
+     * @return the real local socket address
+     */
+    public SocketAddress getRealLocalAddress() {
         return wrappedSession.getLocalAddress();
     }
 
@@ -348,9 +371,13 @@ public class FtpIoSession implements IoSession {
      * {@inheritDoc}
      */
     public SocketAddress getRemoteAddress() {
+        // If PROXY Protocol provided a source address, use it
+        if (containsAttribute(ATTRIBUTE_PROXY_REMOTE_ADDRESS)) {
+            return (SocketAddress) getAttribute(ATTRIBUTE_PROXY_REMOTE_ADDRESS);
+        }
+
         // when closing a socket, the remote address might be reset to null
         // therefore, we attempt to keep a cached copy around
-
         SocketAddress address = wrappedSession.getRemoteAddress();
         if (address == null
                 && containsAttribute(ATTRIBUTE_CACHED_REMOTE_ADDRESS)) {

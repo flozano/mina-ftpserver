@@ -22,6 +22,7 @@ package org.apache.ftpserver.listener.nio;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.security.GeneralSecurityException;
 import java.util.HashSet;
 import java.util.List;
@@ -40,6 +41,7 @@ import org.apache.ftpserver.listener.Listener;
 import org.apache.ftpserver.listener.ListenerFactory;
 import org.apache.ftpserver.ssl.ClientAuth;
 import org.apache.ftpserver.ssl.SslConfiguration;
+import org.apache.ftpserver.ssl.impl.NoReverseDnsSslFilter;
 import org.apache.mina.core.session.IdleStatus;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
@@ -107,7 +109,15 @@ public class NioListener extends AbstractListener {
      */
     public NioListener(String serverAddress, int port, boolean implicitSsl, SslConfiguration sslConfiguration,
         DataConnectionConfiguration dataConnectionConfig, int idleTimeout, SessionFilter sessionFilter) {
-        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter);
+        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter,
+            false);
+    }
+
+    public NioListener(String serverAddress, int port, boolean implicitSsl, SslConfiguration sslConfiguration,
+        DataConnectionConfiguration dataConnectionConfig, int idleTimeout, SessionFilter sessionFilter,
+        boolean proxyProtocol) {
+        super(serverAddress, port, implicitSsl, sslConfiguration, dataConnectionConfig, idleTimeout, sessionFilter,
+            proxyProtocol);
     }
 
     /**
@@ -129,6 +139,39 @@ public class NioListener extends AbstractListener {
                 address = new InetSocketAddress(getServerAddress(), getPort());
             } else {
                 address = new InetSocketAddress(getPort());
+            }
+
+            boolean multiplex = isMultiplexEnabled(getDataConnectionConfiguration());
+            boolean hasService = getPassiveConnectionService() != null;
+            boolean defaultConfig = getDataConnectionConfiguration()
+                    instanceof org.apache.ftpserver.impl.DefaultDataConnectionConfiguration;
+
+            if (multiplex && !hasService && defaultConfig) {
+                InetAddress passiveBindAddress = null;
+                String passiveAddress = getDataConnectionConfiguration().getPassiveAddress();
+                if (passiveAddress != null) {
+                    try {
+                        passiveBindAddress = InetAddress.getByName(passiveAddress);
+                    } catch (UnknownHostException e) {
+                        throw new FtpServerConfigurationException("Unknown passive address", e);
+                    }
+                }
+
+                org.apache.ftpserver.impl.DefaultDataConnectionConfiguration cfg =
+                        (org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) getDataConnectionConfiguration();
+                int maxTotalReservations = cfg.getMaxTotalPassiveReservations();
+                org.apache.ftpserver.impl.PassiveConnectionService pcs =
+                    maxTotalReservations > 0
+                            ? new org.apache.ftpserver.impl.PassiveConnectionService(
+                                    cfg.getPassivePortSet(), passiveBindAddress, 1000, maxTotalReservations,
+                                    isProxyProtocol())
+                            : new org.apache.ftpserver.impl.PassiveConnectionService(
+                                    cfg.getPassivePortSet(), passiveBindAddress, 1000,
+                                    org.apache.ftpserver.impl.PassiveConnectionService.defaultMaxTotalReservations(
+                                            cfg.getPassivePortSet()),
+                                    isProxyProtocol());
+                pcs.start();
+                setPassiveConnectionService(pcs);
             }
 
             acceptor.setReuseAddress(true);
@@ -159,7 +202,8 @@ public class NioListener extends AbstractListener {
                 SslFilter ssl_filter;
 
                 try {
-                    ssl_filter = new SslFilter(ssl_conf.getSSLContext());
+                    // never SslFilter itself: it reverse-resolves every client IP on connect
+                    ssl_filter = new NoReverseDnsSslFilter(ssl_conf.getSSLContext());
                 } catch (GeneralSecurityException e) {
                     throw new FtpServerConfigurationException("SSL could not be initialized, check configuration");
                 }
@@ -179,6 +223,13 @@ public class NioListener extends AbstractListener {
                 }
 
                 acceptor.getFilterChain().addFirst("sslFilter", ssl_filter);
+            }
+
+            if (isProxyProtocol()) {
+                LOG.info("Adding PROXY Protocol v2 filter to listener on port {}", getPort());
+                acceptor.getFilterChain().addFirst("proxyProtocol", new ProxyProtocolFilter());
+            } else {
+                LOG.info("PROXY Protocol NOT enabled for listener on port {}", getPort());
             }
 
             handler.init(context, this);
@@ -206,6 +257,13 @@ public class NioListener extends AbstractListener {
         setPort(acceptor.getLocalAddress().getPort());
     }
 
+    private boolean isMultiplexEnabled(org.apache.ftpserver.DataConnectionConfiguration cfg) {
+        if (cfg instanceof org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) {
+            return ((org.apache.ftpserver.impl.DefaultDataConnectionConfiguration) cfg).isMultiplexPassivePorts();
+        }
+        return false;
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -215,6 +273,11 @@ public class NioListener extends AbstractListener {
             acceptor.unbind();
             acceptor.dispose();
             acceptor = null;
+        }
+
+        if (getPassiveConnectionService() != null) {
+            getPassiveConnectionService().stop();
+            setPassiveConnectionService(null);
         }
 
         context = null;

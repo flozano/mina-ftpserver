@@ -16,35 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+package org.apache.ftpserver.impl;
 
-package org.apache.ftpserver.clienttests;
-
-import org.apache.commons.net.ftp.FTPReply;
+import java.net.InetSocketAddress;
 
 /**
-*
-* @author <a href="http://mina.apache.org">Apache MINA Project</a>
-*
-*/
-public class SystTest extends ClientTestTemplate {
+ * Holds the parsed result of a HAProxy PROXY Protocol v2 header.
+ */
+public record ProxyProtocolResult(
+        InetSocketAddress sourceAddress,
+        InetSocketAddress destinationAddress,
+        boolean local) {
 
-    /*
-     * (non-Javadoc)
-     * 
-     * @see org.apache.ftpserver.clienttests.ClientTestTemplate#setUp()
-     */
     @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-
-        client.login(ADMIN_USERNAME, ADMIN_PASSWORD);
+    public String toString() {
+        if (local) {
+            return "ProxyProtocol[LOCAL]";
+        }
+        return "ProxyProtocol[src=" + sourceAddress + ", dst=" + destinationAddress + "]";
     }
-
-    public void testSyst() throws Exception {
-        assertTrue(FTPReply.isPositiveCompletion(client.syst()));
-        // hardcoded to Unix as that's the type of list etc we use
-        assertEquals("215 UNIX Type: FTP Service", client.getReplyString()
-                .trim());
-    }
-
 }

@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.StringTokenizer;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -116,6 +117,18 @@ public class PassivePorts {
         }
 
         return passivePortsList;
+    }
+
+    /**
+     * Returns all configured ports, regardless of reservation state.
+     *
+     * @return set of configured passive ports
+     */
+    public synchronized Set<Integer> getPorts() {
+        Set<Integer> ports = new HashSet<>(freeList.size() + usedList.size());
+        ports.addAll(freeList);
+        ports.addAll(usedList);
+        return ports;
     }
 
     /**
@@ -214,7 +227,7 @@ public class PassivePorts {
     }
 
     /**
-     * Reserve the next port
+     * Reserve the next port, picked at random from the free ports.
      *
      * @return The reserved port
      */
@@ -250,6 +263,126 @@ public class PassivePorts {
     }
 
     /**
+     * Reserve a port from a caller-supplied allow-list.
+     * <p>
+     * This is a restriction, not a hint. Only a port present in <code>allowedPorts</code> can be
+     * reserved; when every one of them is unavailable this returns -1 rather than falling back to
+     * the rest of the pool. Callers restricting a session to a subset therefore get a failure they
+     * can report, never a port outside the subset.
+     * <p>
+     * The entries are tried in the order given, so a caller may also express a preference within
+     * what it allows. Entries that are not among this instance's configured ports are ignored.
+     * <p>
+     * There is deliberately no value meaning "any port". Callers that intend no restriction use
+     * {@link #reserveNextPort()} instead; nothing should pass an empty list, and nothing should
+     * pass <code>null</code>. Both are tolerated rather than thrown, and both allow nothing, so a
+     * caller whose allow-list computation goes wrong gets a visible failure instead of the run of
+     * the whole pool.
+     *
+     * @param allowedPorts
+     *            The only ports that may be reserved, most preferred first. Required.
+     * @return The reserved port, or -1 if none of the allowed ports could be reserved
+     */
+    public synchronized int reserveNextPort(final List<Integer> allowedPorts) {
+        return reserveNextPort(allowedPorts, 0L);
+    }
+
+    /**
+     * Reserve a port from the caller's allow-list, waiting up to <code>timeoutMillis</code> for one
+     * to be released if none is free right now.
+     * <p>
+     * A pool small enough to be exhausted by a burst fails every caller that arrives during it,
+     * even though ports are typically held only briefly. Waiting turns that cliff into a short
+     * queue: the caller is woken by {@link #releasePort(int)} as soon as a port comes back, and
+     * gives up with -1 once the deadline passes, so a genuine outage still fails rather than
+     * hanging.
+     * <p>
+     * A timeout of 0 (or less) does not wait at all and behaves exactly like
+     * {@link #reserveNextPort(List)}.
+     * <p>
+     * Each waiter re-tests <em>its own</em> allow-list on every wake-up. That is what makes this
+     * safe when callers have different allow-lists over one pool: a release only satisfies the
+     * waiters whose list actually contains the released port, and the rest go back to waiting
+     * instead of consuming it.
+     *
+     * @param allowedPorts
+     *            The only ports that may be reserved, most preferred first. Required.
+     * @param timeoutMillis
+     *            How long to wait for a port to be released; 0 or less does not wait
+     * @return The reserved port, or -1 if none became available before the deadline
+     */
+    public synchronized int reserveNextPort(final List<Integer> allowedPorts, final long timeoutMillis) {
+        if (allowedPorts == null || allowedPorts.isEmpty()) {
+            return -1;
+        }
+
+        if (timeoutMillis <= 0L) {
+            return tryReserve(allowedPorts);
+        }
+
+        // Monotonic, so a wall-clock step (an NTP correction, a VM resuming) can neither cut the
+        // wait short nor stretch it past the caller's bound.
+        final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+
+        for (;;) {
+            int reserved = tryReserve(allowedPorts);
+
+            if (reserved != -1) {
+                return reserved;
+            }
+
+            long remainingNanos = deadline - System.nanoTime();
+
+            if (remainingNanos <= 0L) {
+                return -1;
+            }
+
+            try {
+                // Releases this monitor, so releasePort() can get in and hand a port back. Rounded
+                // up because wait(0) means "wait forever": a sub-millisecond remainder must never be
+                // truncated into an unbounded wait.
+                wait(TimeUnit.NANOSECONDS.toMillis(remainingNanos) + 1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return -1;
+            }
+        }
+    }
+
+    /**
+     * One pass over the allow-list. Must be called while holding this object's monitor.
+     *
+     * @param allowedPorts
+     *            The only ports that may be reserved, most preferred first
+     * @return The reserved port, or -1 if none of them is currently free
+     */
+    private int tryReserve(final List<Integer> allowedPorts) {
+        for (Integer candidate : allowedPorts) {
+            if (candidate == null || !freeList.contains(candidate)) {
+                // already reserved, or not one of our ports
+                continue;
+            }
+
+            if (candidate == 0) {
+                // "Any" port should not be removed from our free list,
+                // nor added to the used list
+                return 0;
+            }
+
+            if (checkPortUnbound(candidate)) {
+                freeList.remove(candidate);
+                usedList.add(candidate);
+                return candidate;
+            }
+
+            // log port unavailable, but left in pool
+            log.warn("Passive port in use by another process: " + candidate);
+        }
+
+        return -1;
+    }
+
+    /**
      * Release a port
      *
      * @param port The port to release
@@ -261,6 +394,10 @@ public class PassivePorts {
 
         } else if (usedList.remove(port)) {
             freeList.add(port);
+            // Wake everyone waiting in reserveNextPort(List, long). They cannot be woken
+            // selectively because each has its own allow-list, so each re-tests its own on wake
+            // and the ones this port does not satisfy go back to waiting.
+            notifyAll();
 
         } else {
             // log attempt to release unused port

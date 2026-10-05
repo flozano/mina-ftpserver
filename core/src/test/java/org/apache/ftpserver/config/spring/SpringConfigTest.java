@@ -32,8 +32,10 @@ import org.apache.ftpserver.ipfilter.RemoteIpFilter;
 import org.apache.ftpserver.listener.Listener;
 import org.apache.ftpserver.listener.nio.NioListener;
 import org.apache.mina.filter.firewall.Subnet;
-import org.springframework.beans.factory.xml.XmlBeanFactory;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.beans.factory.xml.XmlBeanDefinitionReader;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 
 import junit.framework.TestCase;
 
@@ -45,7 +47,7 @@ import junit.framework.TestCase;
 public class SpringConfigTest extends TestCase {
 
     public void test() throws Throwable {
-        XmlBeanFactory factory = new XmlBeanFactory(new FileSystemResource(
+        DefaultListableBeanFactory factory = loadFactory(new FileSystemResource(
                 "src/test/resources/spring-config/config-spring-1.xml"));
 
         DefaultFtpServer server = (DefaultFtpServer) factory.getBean("server");
@@ -113,5 +115,12 @@ public class SpringConfigTest extends TestCase {
         assertEquals(2, server.getFtplets().size());
         assertEquals(123, ((TestFtplet)server.getFtplets().get("ftplet1")).getFoo());
         assertEquals(223, ((TestFtplet)server.getFtplets().get("ftplet2")).getFoo());
+    }
+
+    private DefaultListableBeanFactory loadFactory(Resource resource) {
+        DefaultListableBeanFactory factory = new DefaultListableBeanFactory();
+        XmlBeanDefinitionReader reader = new XmlBeanDefinitionReader(factory);
+        reader.loadBeanDefinitions(resource);
+        return factory;
     }
 }

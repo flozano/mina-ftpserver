@@ -51,7 +51,12 @@ public class DataConnectionConfigurationFactory {
     private String passiveExternalAddress;
     private PassivePorts passivePorts = new PassivePorts(Collections.<Integer>emptySet(), true);
     private boolean passiveIpCheck = false;
+    private int passiveIpCheckIpv4PrefixLength = 32;
+    private int passiveIpCheckIpv6PrefixLength = 128;
+    private boolean passiveReuseUnusedListener = false;
     private boolean implicitSsl;
+    private boolean multiplexPassivePorts;
+    private int maxTotalPassiveReservations;
 
     /**
      * Public constructor for DataConnectionConfigurationFactory
@@ -70,7 +75,9 @@ public class DataConnectionConfigurationFactory {
                 ssl, activeEnabled, activeIpCheck,
                 activeLocalAddress, activeLocalPort,
                 passiveAddress, passivePorts,
-                passiveExternalAddress, passiveIpCheck, implicitSsl);
+                passiveExternalAddress, passiveIpCheck, implicitSsl, multiplexPassivePorts,
+                maxTotalPassiveReservations, passiveIpCheckIpv4PrefixLength,
+                passiveIpCheckIpv6PrefixLength, passiveReuseUnusedListener);
     }
     /*
      * (Non-Javadoc)
@@ -231,6 +238,71 @@ public class DataConnectionConfigurationFactory {
     }
 
     /**
+     * @return How many leading bits of an IPv4 address the passive IP check compares
+     * @see DataConnectionConfiguration#getPassiveIpCheckIpv4PrefixLength()
+     */
+    public int getPassiveIpCheckIpv4PrefixLength() {
+        return passiveIpCheckIpv4PrefixLength;
+    }
+
+    /**
+     * Sets how many leading bits of an IPv4 address the passive IP check compares: 32 (the
+     * default) for the same address, 24 for the same /24.
+     *
+     * @param prefixLength 0 to 32
+     * @see DataConnectionConfiguration#getPassiveIpCheckIpv4PrefixLength()
+     */
+    public void setPassiveIpCheckIpv4PrefixLength(int prefixLength) {
+        if (prefixLength < 0 || prefixLength > 32) {
+            throw new FtpServerConfigurationException(
+                    "IPv4 prefix length for the passive IP check must be 0 to 32, was " + prefixLength);
+        }
+        this.passiveIpCheckIpv4PrefixLength = prefixLength;
+    }
+
+    /**
+     * @return How many leading bits of an IPv6 address the passive IP check compares
+     * @see DataConnectionConfiguration#getPassiveIpCheckIpv6PrefixLength()
+     */
+    public int getPassiveIpCheckIpv6PrefixLength() {
+        return passiveIpCheckIpv6PrefixLength;
+    }
+
+    /**
+     * Sets whether PASV/EPSV re-advertises the session's unused passive listener instead of
+     * replacing it, so that its port is not released while the client may still connect to it.
+     *
+     * @param reuse <code>true</code> to re-advertise
+     * @see DataConnectionConfiguration#isPassiveReuseUnusedListener()
+     */
+    public void setPassiveReuseUnusedListener(boolean reuse) {
+        this.passiveReuseUnusedListener = reuse;
+    }
+
+    /**
+     * @return Whether PASV/EPSV re-advertises an unused passive listener
+     * @see DataConnectionConfiguration#isPassiveReuseUnusedListener()
+     */
+    public boolean isPassiveReuseUnusedListener() {
+        return passiveReuseUnusedListener;
+    }
+
+    /**
+     * Sets how many leading bits of an IPv6 address the passive IP check compares: 128 (the
+     * default) for the same address, 64 for the same /64.
+     *
+     * @param prefixLength 0 to 128
+     * @see DataConnectionConfiguration#getPassiveIpCheckIpv6PrefixLength()
+     */
+    public void setPassiveIpCheckIpv6PrefixLength(int prefixLength) {
+        if (prefixLength < 0 || prefixLength > 128) {
+            throw new FtpServerConfigurationException(
+                    "IPv6 prefix length for the passive IP check must be 0 to 128, was " + prefixLength);
+        }
+        this.passiveIpCheckIpv6PrefixLength = prefixLength;
+    }
+
+    /**
      * Get passive data port. Data port number zero (0) means that any available
      * port will be used.
      * @return A passive port to use
@@ -265,6 +337,10 @@ public class DataConnectionConfigurationFactory {
      */
     public String getPassivePorts() {
         return passivePorts.toString();
+    }
+
+    public java.util.Set<Integer> getPassivePortSet() {
+        return passivePorts.getPorts();
     }
 
     /**
@@ -328,5 +404,46 @@ public class DataConnectionConfigurationFactory {
      */
     public void setImplicitSsl(boolean implicitSsl) {
         this.implicitSsl = implicitSsl;
+    }
+
+    /**
+     * Tells if passive ports can be reused concurrently per client IP.
+     *
+     * @return true if multiplexing is enabled
+     */
+    public boolean isMultiplexPassivePorts() {
+        return multiplexPassivePorts;
+    }
+
+    /**
+     * Enable passive port multiplexing per client IP.
+     *
+     * @param multiplexPassivePorts true to enable multiplexing
+     */
+    public void setMultiplexPassivePorts(boolean multiplexPassivePorts) {
+        this.multiplexPassivePorts = multiplexPassivePorts;
+    }
+
+    /**
+     * Returns the global cap for multiplexed passive reservations.
+     * A value of 0 means "use internal default".
+     *
+     * @return maximum total passive reservations across all client IPs
+     */
+    public int getMaxTotalPassiveReservations() {
+        return maxTotalPassiveReservations;
+    }
+
+    /**
+     * Sets the global cap for multiplexed passive reservations.
+     * A value of 0 means "use internal default".
+     *
+     * @param maxTotalPassiveReservations maximum total passive reservations
+     */
+    public void setMaxTotalPassiveReservations(int maxTotalPassiveReservations) {
+        if (maxTotalPassiveReservations < 0) {
+            throw new IllegalArgumentException("Maximum total passive reservations cannot be negative");
+        }
+        this.maxTotalPassiveReservations = maxTotalPassiveReservations;
     }
 }

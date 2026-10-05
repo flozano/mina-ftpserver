@@ -20,7 +20,9 @@
 package org.apache.ftpserver;
 
 import java.net.InetAddress;
+import java.util.List;
 
+import org.apache.ftpserver.ftplet.FtpSession;
 import org.apache.ftpserver.ssl.SslConfiguration;
 
 /**
@@ -93,6 +95,13 @@ public interface DataConnectionConfiguration {
     String getPassivePorts();
 
     /**
+     * Returns the parsed passive port numbers.
+     *
+     * @return The set of passive port numbers
+     */
+    java.util.Set<Integer> getPassivePortSet();
+
+    /**
      * Tells whether or not IP address check is performed when accepting a
      * passive data connection.
      *
@@ -105,10 +114,101 @@ public interface DataConnectionConfiguration {
     boolean isPassiveIpCheck();
 
     /**
+     * How many leading bits of its IPv4 address a passive data connection must share with the
+     * control connection when {@link #isPassiveIpCheck()} is enabled. 32, the default, requires
+     * the very same address. A shorter prefix, such as 24, also accepts a client whose network
+     * sends its data connection out through a neighbouring address, as some NAT pools do.
+     *
+     * @return The IPv4 prefix length, 0 to 32
+     */
+    default int getPassiveIpCheckIpv4PrefixLength() {
+        return 32;
+    }
+
+    /**
+     * The IPv6 counterpart of {@link #getPassiveIpCheckIpv4PrefixLength()}. 128, the default,
+     * requires the very same address.
+     *
+     * @return The IPv6 prefix length, 0 to 128
+     */
+    default int getPassiveIpCheckIpv6PrefixLength() {
+        return 128;
+    }
+
+    /**
+     * Whether a PASV/EPSV that arrives while the session still holds an unused passive listener
+     * re-advertises that listener instead of closing it and binding a new port.
+     * <p>
+     * Closing it returns its port to the pool at once, although the client may already have read
+     * the first reply and be about to connect there - typically a client that sent PASV twice
+     * without waiting. If another session is given that port in the meantime, it accepts this
+     * client's data connection and stores the data as its own file. Re-advertising keeps the port
+     * with the session that was given it, so whichever reply the client acts on, it connects to its
+     * own session. A session only ever has one transfer at a time, so it never needs two listeners.
+     * <p>
+     * Applies when passive ports are not multiplexed. Defaults to <code>false</code>.
+     *
+     * @return <code>true</code> to re-advertise an unused passive listener
+     */
+    default boolean isPassiveReuseUnusedListener() {
+        return false;
+    }
+
+    /**
      * Request a passive port. Will block until a port is available
      * @return A free passive part
      */
     int requestPassivePort();
+
+    /**
+     * Request a passive port for a specific session, allowing an implementation to take the
+     * session into account when choosing one.
+     * <p>
+     * The default implementation ignores the session and behaves like
+     * {@link #requestPassivePort()}.
+     *
+     * @param session The session the port is requested for
+     * @return A free passive port, or -1 if none could be reserved
+     */
+    default int requestPassivePort(FtpSession session) {
+        return requestPassivePort();
+    }
+
+    /**
+     * Request a passive port restricted to a caller-supplied allow-list.
+     * <p>
+     * Implementations that honour this must reserve only a port present in
+     * <code>allowedPorts</code>, and return -1 when none of them is available rather than falling
+     * back to the rest of the pool. Entries are tried in the order given. Callers that intend no
+     * restriction use {@link #requestPassivePort()}; this form is not the place to express that.
+     * <p>
+     * The default implementation ignores the restriction and behaves like
+     * {@link #requestPassivePort()}.
+     *
+     * @param allowedPorts The only ports that may be reserved, most preferred first
+     * @return A free passive port, or -1 if none of the allowed ports could be reserved
+     */
+    default int requestPassivePort(List<Integer> allowedPorts) {
+        return requestPassivePort();
+    }
+
+    /**
+     * Request a passive port restricted to a caller-supplied allow-list, waiting up to
+     * <code>timeoutMillis</code> for one to be released if none is free right now.
+     * <p>
+     * A small pool exhausted by a burst otherwise fails every caller that arrives during it, even
+     * though ports are usually held only briefly. Waiting turns that into a short queue. A timeout
+     * of 0 or less does not wait and behaves like {@link #requestPassivePort(List)}.
+     * <p>
+     * The default implementation ignores the timeout and does not wait.
+     *
+     * @param allowedPorts The only ports that may be reserved, most preferred first
+     * @param timeoutMillis How long to wait for a port to be released; 0 or less does not wait
+     * @return A free passive port, or -1 if none became available before the deadline
+     */
+    default int requestPassivePort(List<Integer> allowedPorts, long timeoutMillis) {
+        return requestPassivePort(allowedPorts);
+    }
 
     /**
      * Release passive port.

@@ -36,6 +36,12 @@ public class UserMetadata {
     /** The user address */
     private InetAddress inetAddress;
 
+    /** The local port the client connected to */
+    private int localPort;
+
+    /** Whether the connection is secured (TLS/SSL) */
+    private boolean secure;
+
     /**
      * Public constructor
      */
@@ -86,5 +92,41 @@ public class UserMetadata {
      */
     public void setInetAddress(final InetAddress inetAddress) {
         this.inetAddress = inetAddress;
+    }
+
+    /**
+     * Retrieve the local port the client connected to
+     *
+     * @return The local port
+     */
+    public int getLocalPort() {
+        return localPort;
+    }
+
+    /**
+     * Set the local port the client connected to
+     *
+     * @param localPort The local port
+     */
+    public void setLocalPort(final int localPort) {
+        this.localPort = localPort;
+    }
+
+    /**
+     * Retrieve whether the connection is secured (TLS/SSL)
+     *
+     * @return true if the connection is secured
+     */
+    public boolean isSecure() {
+        return secure;
+    }
+
+    /**
+     * Set whether the connection is secured (TLS/SSL)
+     *
+     * @param secure true if the connection is secured
+     */
+    public void setSecure(final boolean secure) {
+        this.secure = secure;
     }
 }
