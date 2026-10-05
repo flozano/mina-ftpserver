@@ -33,6 +33,7 @@ import org.apache.ftpserver.impl.FtpServerContext;
 import org.apache.ftpserver.impl.LocalizedFtpReply;
 import org.apache.ftpserver.ssl.ClientAuth;
 import org.apache.ftpserver.ssl.SslConfiguration;
+import org.apache.ftpserver.ssl.impl.NoReverseDnsSslFilter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.core.write.WriteRequest;
 import org.apache.mina.filter.ssl.SslFilter;
@@ -152,7 +153,8 @@ public class AUTH extends AbstractCommand {
         SslConfiguration ssl = session.getListener().getSslConfiguration();
 
         if (ssl != null) {
-            SslFilter sslFilter = new SslFilter(ssl.getSSLContext()) {
+            // never SslFilter itself: it reverse-resolves the client IP when the filter is added
+            SslFilter sslFilter = new NoReverseDnsSslFilter(ssl.getSSLContext()) {
                 @Override
                 public void filterWrite(NextFilter next, IoSession session, WriteRequest request) throws Exception {
                     if (request.getOriginalMessage() == reply) {
